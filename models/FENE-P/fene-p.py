@@ -1,62 +1,87 @@
-import fenics as fe
-
+import dolfinx
+import ufl
 import numpy as np
+from mpi4py import MPI
 
 # Define parameters
 Lx, Ly = 1.0, 1.0  # Domain dimensions
-Nx, Ny = 32, 32    # Number of elements
-dt = 0.01          # Time step
-T = 1.0            # Total simulation time
+Nx, Ny = 32, 32  # Number of elements
+dt = 0.01  # Time step
+T = 1.0  # Total simulation time
 
-# Define mesh
-mesh = fe.RectangleMesh(fe.Point(0, 0), fe.Point(Lx, Ly), Nx, Ny)
+comm = MPI.COMM_WORLD
+
+# Create mesh
+mesh = dolfinx.mesh.create_rectangle(comm, [[0., 0.], [Lx, Ly]], [Nx, Ny])
 
 # Define function space
-P1 = fe.FiniteElement('P', mesh.ufl_cell(), 1)
-element = fe.MixedElement([P1, P1, P1])
-V = fe.FunctionSpace(mesh, element)
+V = dolfinx.fem.VectorFunctionSpace(mesh, dolfinx.fem.function.ElementMetaData("CG", 1))
 
 # Define trial and test functions
-u, v, p = fe.TrialFunctions(V)
-w, q, r = fe.TestFunctions(V)
+u = ufl.TrialFunction(V)
+v = ufl.TestFunction(V)
 
 # Define parameters
-K, b, dt = 1.0, 1.0, 0.01
+K, b = 1.0, 1.0
+
+
+def y0_init(x):
+    values = np.zeros((1, x.shape[1]))
+    values[0] = 0.0
+    return values
+
+
+def y1_init(x):
+    values = np.zeros((1, x.shape[1]))
+    values[0] = 0.0
+    return values
+
 
 # Define initial condition
-u_init = fe.Expression(('0', '0'), degree=1)
-p_init = fe.Expression('0', degree=1)
-u_n = fe.interpolate(u_init, V.sub(0).collapse())
-p_n = fe.interpolate(p_init, V.sub(2).collapse())
+u_init = dolfinx.fem.Function(V)
+u_init.sub(0).interpolate(y0_init)
+u_init.sub(1).interpolate(y1_init)
 
 # Define boundary conditions
-bcu = fe.DirichletBC(V.sub(0), fe.Constant((0, 0)), 'on_boundary')
-bcp = fe.DirichletBC(V.sub(2), fe.Constant(0), 'on_boundary')
+bc = dolfinx.fem.dirichletbc(u_init, dolfinx.fem.locate_dofs_geometrical(V, lambda x: np.linalg.norm(x) < 1.0e-10))
 
 # Define FENE-P model
-U = 0.5 * (fe.dot(u, u) + b * b * fe.inner(fe.inv(fe.Identity(2)) + fe.outer(u, u) / (1 - fe.dot(u, u) / K**2), u))
-F = -fe.inner(fe.grad(p), u) + fe.inner(fe.grad(u) * u, v) * fe.dx + 2 * fe.inner(fe.sym(fe.grad(u)), fe.sym(fe.grad(v))) * fe.dx - fe.div(v) * p * fe.dx
+a = ufl.dot(u, u)
+inv = ufl.inv(ufl.Identity(2))
+outer = ufl.outer(u, u)
+denom = (1 - ufl.dot(u, u) / K ** 2)
+print(inv) #2x2
+print(outer) #2x2
+print(denom)
+print(u)
+ba = ufl.dot(inv + outer / denom, u)
+from IPython import embed
+embed()
 
-# Time-stepping
+
+# Create time stepper
+problem = dolfinx.fem.LinearProblem(F, u, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
 t = 0
 while t < T:
     # Update time
     t += dt
 
     # Solve FENE-P equation
-    fe.solve(fe.inner(fe.grad(u_n) * u_n, w) * fe.dx + 2 * fe.inner(fe.sym(fe.grad(u_n)), fe.sym(fe.grad(w))) * fe.dx - fe.div(w) * p_n * fe.dx == 0, u_n)
-
-    # Apply boundary conditions
-    bcu.apply(u_n.vector())
-    bcp.apply(p_n.vector())
+    problem.solve()
 
     # Output
     if t % 0.1 == 0:
-        fe.File(f'u_{t:.1f}.pvd') << u_n
+        u.rename("velocity", "velocity")
+        dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"u_{t:.1f}.xdmf", "w").write_mesh(mesh)
+        dolfinx.io.XDMFFile(MPI.COMM_WORLD, f"u_{t:.1f}.xdmf", "w").write_function(u)
 
 # Plot solution
-fe.plot(u_n, title='Velocity field')
-fe.plot(p_n, title='Pressure field')
+import dolfinx.plot
+
+dolfinx.plot.create_vtk_topology(mesh, 2)
+dolfinx.plot.plot(u)
 
 # Hold plot
-fe.interactive()
+import matplotlib.pyplot as plt
+
+plt.show()
