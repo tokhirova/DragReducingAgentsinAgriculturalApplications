@@ -46,17 +46,8 @@ u_init.sub(1).interpolate(y1_init)
 bc = dolfinx.fem.dirichletbc(u_init, dolfinx.fem.locate_dofs_geometrical(V, lambda x: np.linalg.norm(x) < 1.0e-10))
 
 # Define FENE-P model
-a = ufl.dot(u, u)
-inv = ufl.inv(ufl.Identity(2))
-outer = ufl.outer(u, u)
-denom = (1 - ufl.dot(u, u) / K ** 2)
-print(inv) #2x2
-print(outer) #2x2
-print(denom)
-print(u)
-ba = ufl.dot(inv + outer / denom, u)
-from IPython import embed
-embed()
+U = ...
+F = ...
 
 
 # Create time stepper
