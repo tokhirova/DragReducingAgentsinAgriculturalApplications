@@ -9,6 +9,7 @@ from petsc4py import PETSc
 import petsc4py
 import fene_p_parameters
 import dolfinx.fem.petsc
+from dolfinx.nls.petsc import NewtonSolver
 
 
 class Fene_P:
@@ -42,7 +43,7 @@ class Fene_P:
 
         self.A = lambda phi: ufl.inv((1 / (1 - ufl.tr(phi) / parameters.b))) * ufl.Identity(self.dim_sigma) - ufl.inv(
             phi)
-        self.f = [0,0]
+        self.f = [0, 0]
 
     def mesh(self, parameters: fene_p_parameters):
         comm = MPI.COMM_WORLD
@@ -73,18 +74,21 @@ class Fene_P:
     def init_model(self, mesh, parameters: fene_p_parameters):
         # function spaces
         v_el = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
-        s_el = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 1)#,shape=(mesh.geometry.dim,mesh.geometry.dim))
+        s_el = basix.ufl.element("Lagrange", mesh.topology.cell_name(),
+                                 1)  # ,shape=(mesh.geometry.dim,mesh.geometry.dim))
         V_h_0 = dolfinx.fem.functionspace(mesh, v_el)  # dolfinx.fem.function.ElementMetaData("CG", 1))
-        S_h_0 = dolfinx.fem.functionspace(mesh, s_el)  # dolfinx.fem.function.ElementMetaData("CG", 0))
+        #S_h_0=dolfinx.fem.functionspace(mesh, s_el)  # dolfinx.fem.function.ElementMetaData("CG", 0))
+        S_h_0 = dolfinx.fem.functionspace(mesh, ("Lagrange", 1, (mesh.geometry.dim,)))
+
 
         # trial and test functions
-        #u = ufl.TrialFunction(V_h_0)  # dolfinx.fem.Constant(domain, petsc4py.PETSc.ScalarType(0))
+        # u = ufl.TrialFunction(V_h_0)  # dolfinx.fem.Constant(domain, petsc4py.PETSc.ScalarType(0))
         sigma11 = ufl.TrialFunction(S_h_0)
         sigma12 = ufl.TrialFunction(S_h_0)
         sigma21 = ufl.TrialFunction(S_h_0)
         sigma22 = ufl.TrialFunction(S_h_0)
         sigma = np.array([[sigma11, sigma12], [sigma21, sigma22]])
-        #v = ufl.TestFunction(V_h_0)
+        # v = ufl.TestFunction(V_h_0)
         phi11 = ufl.TestFunction(S_h_0)
         phi12 = ufl.TestFunction(S_h_0)
         phi21 = ufl.TestFunction(S_h_0)
@@ -107,13 +111,15 @@ class Fene_P:
                 self.t = 0.0
 
             def eval(self, x):
-                return (x[1]-0.5)**4
+                return (x[1] - 0.5) ** 4
+
         class vector_field_1:
             def __init__(self):
                 self.t = 0.0
 
             def eval(self, x):
                 return 0.0
+
         # def vector_field(x):
         #     values = np.zeros((2, x.shape[1]))
         #     values[0] = (x[1]-0.5)**4
@@ -124,26 +130,26 @@ class Fene_P:
         u = dolfinx.fem.Function(V_h_0)
         vf_0 = vector_field_0()
         vf_1 = vector_field_1()
-        vf_0.t =0.0
-        vf_1.t =0.0
-        #u = dolfinx.fem.Expression((x[1]-0.5)**4, V_h_0.element.interpolation_points())
+        vf_0.t = 0.0
+        vf_1.t = 0.0
+        # u = dolfinx.fem.Expression((x[1]-0.5)**4, V_h_0.element.interpolation_points())
         u.sub(0).interpolate(vf_0.eval)
         u.sub(1).interpolate(vf_0.eval)
-        #from IPython import embed; embed()
+        # from IPython import embed; embed()
         # Define initial condition
         u_init = dolfinx.fem.Function(V_h_0)
         u_init.sub(0).interpolate(y0_init)
         u_init.sub(1).interpolate(y1_init)
 
-        sigma_init11 = dolfinx.fem.Function(S_h_0)
-        sigma_init12 = dolfinx.fem.Function(S_h_0)
-        sigma_init21 = dolfinx.fem.Function(S_h_0)
-        sigma_init22 = dolfinx.fem.Function(S_h_0)
-        sigma_init11.interpolate(y0_init)
-        sigma_init12.interpolate(y1_init)
-        sigma_init21.interpolate(y1_init)
-        sigma_init22.interpolate(y1_init)
-        sigma_init = np.array([[sigma_init11, sigma_init12], [sigma_init21, sigma_init22]])
+        # sigma_init11 = dolfinx.fem.Function(S_h_0)
+        # sigma_init12 = dolfinx.fem.Function(S_h_0)
+        # sigma_init21 = dolfinx.fem.Function(S_h_0)
+        # sigma_init22 = dolfinx.fem.Function(S_h_0)
+        # sigma_init11.interpolate(y0_init)
+        # sigma_init12.interpolate(y1_init)
+        # sigma_init21.interpolate(y1_init)
+        # sigma_init22.interpolate(y1_init)
+        # sigma_init = np.array([[sigma_init11, sigma_init12], [sigma_init21, sigma_init22]])
 
         f_n = dolfinx.fem.Function(V_h_0)
         f_n.sub(0).interpolate(y0_init)
@@ -153,24 +159,32 @@ class Fene_P:
 
         # Define boundary conditions
         def outflow(x):
-            return np.logical_or(np.isclose(x[0], 0), np.isclose(x[0], 1))
-        sigmaD11 = dolfinx.fem.Function(S_h_0)
-        sigmaD12 = dolfinx.fem.Function(S_h_0)
-        sigmaD21 = dolfinx.fem.Function(S_h_0)
-        sigmaD22 = dolfinx.fem.Function(S_h_0)
-        sigmaD11.interpolate(lambda x: (x[1]-0.5)**4)
-        sigmaD12.interpolate(lambda x: (x[1]-0.5)**4)
-        sigmaD21.interpolate(lambda x: (x[1]-0.5)**4)
-        sigmaD22.interpolate(lambda x: (x[1]-0.5)**4)
+            return np.logical_or(np.logical_or(np.isclose(x[0], 0), np.isclose(x[0], 1)),
+                                  np.logical_or(np.isclose(x[1], 0), np.isclose(x[1], 1)))
 
-        bc11 = dolfinx.fem.dirichletbc(sigmaD11,
-                                     dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
-        bc12 = dolfinx.fem.dirichletbc(sigmaD12,
-                                     dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
-        bc21 = dolfinx.fem.dirichletbc(sigmaD21,
-                                     dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
-        bc22 = dolfinx.fem.dirichletbc(sigmaD22,
-                                     dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
+        # sigmaD11 = dolfinx.fem.Function(S_h_0)
+        # sigmaD12 = dolfinx.fem.Function(S_h_0)
+        # sigmaD21 = dolfinx.fem.Function(S_h_0)
+        # sigmaD22 = dolfinx.fem.Function(S_h_0)
+        # sigmaD11.interpolate(lambda x: (x[1] - 0.5) ** 4)
+        # sigmaD12.interpolate(lambda x: (x[1] - 0.5) ** 4)
+        # sigmaD21.interpolate(lambda x: (x[1] - 0.5) ** 4)
+        # sigmaD22.interpolate(lambda x: (x[1] - 0.5) ** 4)
+
+        fdim = mesh.topology.dim - 1
+        boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh, fdim, outflow)
+        s_zero = np.array([0, 0], dtype=dolfinx.default_scalar_type)
+        bc11 = dolfinx.fem.dirichletbc(s_zero,  dolfinx.fem.locate_dofs_topological(S_h_0, fdim,boundary_facets), S_h_0)
+        # bc11 = dolfinx.fem.dirichletbc(s_zero,  dolfinx.fem.locate_dofs_geometrical(S_h_0, clamped_boundary), S_h_0)
+
+        # bc11 = dolfinx.fem.dirichletbc(sigmaD11,
+        #                                dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
+        # bc12 = dolfinx.fem.dirichletbc(sigmaD12,
+        #                                dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
+        # bc21 = dolfinx.fem.dirichletbc(sigmaD21,
+        #                                dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
+        # bc22 = dolfinx.fem.dirichletbc(sigmaD22,
+        #                                dolfinx.fem.locate_dofs_geometrical(S_h_0, outflow))
 
         """
         P1 = self.Re * dot((u - u_init) / dt, v) * dx
@@ -185,26 +199,26 @@ class Fene_P:
         s11_init.sub(0).interpolate(y0_init)
         s11_init.sub(1).interpolate(y1_init)
         p11 = ufl.TestFunction(S_h_0)
-        
+
         s12 = ufl.TrialFunction(S_h_0)
         s12_init = dolfinx.fem.Function(S_h_0)
         s12_init.sub(0).interpolate(y0_init)
         s12_init.sub(1).interpolate(y1_init)
         p12 = ufl.TestFunction(S_h_0)
-        
+
         s21 = ufl.TrialFunction(S_h_0)
         s21_init = dolfinx.fem.Function(S_h_0)
         s21_init.sub(0).interpolate(y0_init)
         s21_init.sub(1).interpolate(y1_init)
         p21 = ufl.TestFunction(S_h_0)
-        
+
         s22 = ufl.TrialFunction(S_h_0)
         s22_init = dolfinx.fem.Function(S_h_0)
         s22_init.sub(0).interpolate(y0_init)
         s22_init.sub(1).interpolate(y1_init)
         p22 = ufl.TestFunction(S_h_0)
-        
-        
+
+
         P2 = dot((sigma - sigma_init) / dt, phi) * dx
         P2 += dot(dot(u, ufl.grad(u)) * sigma, phi) * dx
         P2 -= ufl.grad(u) * sigma * phi * dx
@@ -221,7 +235,7 @@ class Fene_P:
         rhs1 += (sigma[0,0]*(u[0].dx(0)*phi[0,0]+u[1].dx(1)*phi[1,0])+ sigma[0,1]*(u[1].dx(0)*phi[0,0]+u[1].dx(1)*phi[1,0]))*dx
         rhs1 -= (((sigma[0,0]*(ufl.inv(1-trs)-sigma[1,0]/dets)+sigma[1,0]*ufl.Constant(sigma[0,1])/dets)*phi[0,0] +
                  (sigma[0,1]*(ufl.inv(1-trs)-ufl.Constant(sigma[1,1])/dets)+sigma[1,1]*ufl.Constant(sigma[0,1])/dets)*phi[1,0])/self.Wi)*dx
-
+        #
         lhs2 = ((sigma[0,0]-sigma_init[0,0])*phi[0,1] + (sigma[0,1] - sigma_init[0,1])*phi[1,1])*dx
         rhs2 = -((u[0]*sigma[0,0].dx(0) + u[1]*sigma[0,1].dx(1))*phi[0,1]+(u[0]*sigma[0,1].dx(0)+u[1]*sigma[0,1].dx(1))*phi[1,1])*dx
         rhs2 += (u[0].dx(0)*(sigma[0,0]*phi[0,1] + sigma[0,1]*phi[1,1]) + u[0].dx(1)*(sigma[1,0]*phi[0,1] + sigma[1,1]*phi[1,1]))*dx
@@ -239,7 +253,7 @@ class Fene_P:
             0, 0] +
                  (sigma[1, 0] * sigma[0, 1] / dets + sigma[1, 1] * (ufl.inv(1 - trs) - sigma[1, 1] / dets)) * phi[
                      1, 0])/ self.Wi) * dx
-
+        #
         lhs4 = ((sigma[1, 0] - sigma_init[1, 0]) * phi[0, 1] + (sigma[1, 1] - sigma_init[1, 1]) * phi[1, 1]) * dx
         rhs4 = -((u[0] * sigma[1, 0].dx(0) + u[1] * sigma[1, 0].dx(1)) * phi[0, 1] + (
                     u[0] * sigma[1, 1].dx(0) + u[1] * sigma[1, 1].dx(1)) * phi[1, 1]) * dx
@@ -251,51 +265,72 @@ class Fene_P:
             0, 1] +
                  (sigma[1, 0] * sigma[0, 1] / dets + sigma[1, 1] * (ufl.inv(1 - trs) - sigma[1, 1] / dets)) * phi[
                      1, 1])/ self.Wi) * dx
+        from IPython import embed; embed()
+        lhs = ufl.dot(ufl.grad(sigma11), ufl.grad(phi11)) * dx
+        rhs = sigma11 * phi11 * dx + sigma11 * phi11 * dx
 
-        lhs = [lhs1, lhs2, lhs3, lhs4]
-        rhs = [rhs1, rhs2, rhs3, rhs4]
-        #F = lhs - rhs
+        # lhs2 = ufl.dot(ufl.grad(sigma12), ufl.grad(phi12)) * dx
+        # rhs2 = sigma12 * phi12 * dx
+        # lhs3 = ufl.dot(ufl.grad(sigma21), ufl.grad(phi21)) * dx
+        # rhs3 = sigma21 * phi21 * dx
+        # lhs4 = ufl.dot(ufl.grad(sigma22), ufl.grad(phi22)) * dx
+        # rhs4 = sigma22 * phi22 * dx
 
-        return V_h_0, S_h_0, lhs, rhs, u, sigma, u_init, bc11, bc12, bc21, bc22
-
-    def solve(self, parameters: fene_p_parameters, mesh, V, S, lhs, rhs, u, sigma, u_n, bc11, bc12, bc21, bc22):
-        #from IPython import embed
+        #lhs = dolfinx.fem.form(lhs)
+        #rhs = dolfinx.fem.form(rhs)
+        from IPython import embed
         #embed()
-        problem = dolfinx.fem.petsc.NonlinearProblem(lhs[0]- rhs[0] + lhs[1]- rhs[1] + lhs[2]- rhs[2] + lhs[3]- rhs[3] == 0,sigma, bcs=[bc11, bc12, bc21, bc22])#, petsc_options={"ksp_type": "gmres", "ksp_rtol": 1e-6, "ksp_atol": 1e-10, "ksp_max_it": 1000, "pc_type": "none"})
+        #lhs = dolfinx.fem.petsc.create_vector_block([lhs1, lhs2, lhs3, lhs4])
+        #rhs = dolfinx.fem.petsc.create_vector_block([rhs1, rhs2, rhs3, rhs4])
+        # F = lhs - rhs
 
-        sigmah = problem.solve()
-        lu_solver = problem.solver
-        viewer = PETSc.Viewer().createASCII("gmres_output.txt")
-        lu_solver.view(viewer)
-        solver_output = open("gmres_output.txt", "r")
-        for line in solver_output.readlines():
-            print(line)
+        return V_h_0, S_h_0, lhs, rhs, u, sigma11, u_init, bc11
+
+    def solve(self, parameters: fene_p_parameters, mesh, V, S, lhs, rhs, u, sigma, u_n, bc11):
+        from IPython import embed
+        #embed()
+        sh = dolfinx.fem.Function(S)
+        problem = dolfinx.fem.petsc.NonlinearProblem(lhs,rhs, bcs=[bc11])  # , petsc_options={"ksp_type": "gmres", "ksp_rtol": 1e-6, "ksp_atol": 1e-10, "ksp_max_it": 1000, "pc_type": "none"})
+
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+        solver.convergence_criterion = "incremental"
+        solver.rtol = 1e-6
+        solver.report = True
+        ksp = solver.krylov_solver
+        opts = PETSc.Options()
+        option_prefix = ksp.getOptionsPrefix()
+        opts[f"{option_prefix}ksp_type"] = "cg"
+        opts[f"{option_prefix}pc_type"] = "gamg"
+        opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+        ksp.setFromOptions()
+        dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
+        n, converged = solver.solve(sh)
+        assert (converged)
+        print(f"Number of interations: {n:d}")
+
+        # np.zeros((parameters.num_time_steps + 1), V.dim()),
+        solution_data = [np.zeros((parameters.num_time_steps + 1, 2, 2))]
+        time_values_data = np.zeros(parameters.num_time_steps + 1)
         t = t_n = 0
         dt = parameters.T / parameters.num_time_steps
-        from IPython import embed;
-        embed()
-        #np.zeros((parameters.num_time_steps + 1), V.dim()),
-        solution_data = [np.zeros((parameters.num_time_steps + 1,2,2))]
-        time_values_data = np.zeros(parameters.num_time_steps + 1)
-
-        for time_step in range(parameters.num_time_steps):
-            t += dt
-            # dolfinx.fem.petsc.assemble_vector(P1, P2)
-            # problem.solve(F, sigma, bc)
-            #solution_data[0][t + 1, :] = np.array(u.vector())
-            solution_data[0][t + 1, :] = np.array(sigma.vector())
-            time_values_data[t + 1] = t
-
-            u_n.assign(u)
-            t_n = t
+        # for time_step in range(parameters.num_time_steps):
+        #     t += dt
+        #     # dolfinx.fem.petsc.assemble_vector(P1, P2)
+        #     # problem.solve(F, sigma, bc)
+        #     # solution_data[0][t + 1, :] = np.array(u.vector())
+        #     solution_data[0][t + 1, :] = np.array(sigma.vector())
+        #     time_values_data[t + 1] = t
+        #
+        #     u_n.assign(u)
+        #     t_n = t
 
         return solution_data, time_values_data
 
-    def run(self,parameters):
+    def run(self, parameters):
         self.init_parameters_and_functions(parameters)
         mesh = self.mesh(parameters)
-        V, S, lhs, rhs, u, sigma, u_init, bc11, bc12, bc21, bc22 = self.init_model(mesh, parameters)
-        return self.solve(parameters, mesh, V, S, lhs, rhs, u, sigma, u_init, bc11, bc12, bc21, bc22)
+        V, S, lhs, rhs, u, sigma, u_init, bc11 = self.init_model(mesh, parameters)
+        return self.solve(parameters, mesh, V, S, lhs, rhs, u, sigma, u_init, bc11)
 
     # Plot solution
     def plot(self, mesh, P):
