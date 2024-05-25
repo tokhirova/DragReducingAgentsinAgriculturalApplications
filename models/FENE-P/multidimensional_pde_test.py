@@ -283,6 +283,30 @@ class Fene_P:
         #lhs = dolfinx.fem.petsc.create_vector_block([lhs1, lhs2, lhs3, lhs4])
         #rhs = dolfinx.fem.petsc.create_vector_block([rhs1, rhs2, rhs3, rhs4])
         # F = lhs - rhs
+        # term2 = (vector_field1 * sigma.dx(0) * phi + vector_field2 * sigma.dx(1) * phi) * ufl.dx
+        term2 = ((vector_field1 * sigma[0, 0].dx(0) + vector_field2 * sigma[0, 0].dx(1)) * phi[0, 0] + (
+                vector_field1 * sigma[0, 1].dx(0) + vector_field2 * sigma[0, 1].dx(1)) * phi[0, 1]
+                 (vector_field1 * sigma[1, 0].dx(0) + vector_field2 * sigma[1, 0].dx(1)) * phi[1, 0] + (
+                         vector_field1 * sigma[1, 1].dx(0) + vector_field2 * sigma[1, 1].dx(1)) * phi[1, 1]) * dx
+
+        # term3 = (vector_field1.dx(0) * sigma * phi + vector_field2.dx(1) * sigma * phi) * ufl.dx
+        term3 = ((vector_field1.dx(0) * sigma[0, 0] + vector_field1.dx(1) * sigma[1, 0]) * phi[0, 0] + (
+                vector_field1.dx(0) * sigma[0, 1] + vector_field1.dx(1) * sigma[1, 1]) * phi[0, 1]
+                 (vector_field2.dx(0) * sigma[0, 0] + vector_field2.dx(1) * sigma[1, 0]) * phi[1, 0] + (
+                         vector_field2.dx(0) * sigma[0, 1] + vector_field2.dx(1) * sigma[1, 1]) * phi[1, 1]) * dx
+
+        term4 = ((vector_field1.dx(0) * sigma[0, 0] + vector_field1.dx(1) * sigma[0, 1]) * phi[0, 0] + (
+                vector_field2.dx(0) * sigma[0, 0] + vector_field2.dx(1) * sigma[0, 1]) * phi[0, 1]
+                 (vector_field1.dx(0) * sigma[1, 0] + vector_field1.dx(1) * sigma[1, 1]) * phi[1, 0] + (
+                         vector_field2.dx(0) * sigma[1, 0] + vector_field2.dx(1) * sigma[1, 1]) * phi[1, 1]) * dx
+
+        # term5 = (((sigma * phi) / (1 - sigma / b) - phi)) * ufl.dx
+        a = 1 / (1 - (ufl.tr(sigma)) / b)
+        dets = ufl.det(sigma)
+        term5 = (((a - sigma[1, 1] / dets) * sigma[0, 0] - sigma[0, 1] / dets * sigma[1, 0]) * phi[0, 0] + (
+                (a - sigma[1, 0] / dets) * sigma[0, 1] - sigma[0, 1] / dets * sigma[1, 1]) * phi[0, 1]
+                 + ((a - sigma[0, 0] / dets) * sigma[1, 0] - sigma[1, 0] / dets * sigma[0, 0]) * phi[1, 0] + (
+                         (a - sigma[0, 0] / dets) * sigma[1, 1] - sigma[1, 0] / dets * sigma[0, 1]) * phi[1, 1]) * dx
 
         return V_h_0, S_h_0, lhs, rhs, u, sigma11, u_init, bc11
 
