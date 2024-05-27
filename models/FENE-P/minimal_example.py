@@ -102,7 +102,7 @@ dt = T / steps
 # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
 
 sigma_n = dolfinx.fem.Function(V)
-sigma_n.vector.set(0.0)
+sigma_n.vector.set(1.0)
 
 sigma_11_solution_data = []
 sigma_12_solution_data = []
@@ -184,7 +184,7 @@ def plotting_gif(sigma_list):
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
     grid.point_data["sigma"] = sigma_list[0]
     warped = grid.warp_by_scalar("sigma", factor=0.5)
-    plotter.add_mesh(warped, show_edges=True,clim=[0, max(sigma_list[0])])
+    plotter.add_mesh(warped, show_edges=True,clim=[0, np.max(sigma_list)])
     #grid.set_active_scalars("sigma")
     for sigma_sol in sigma_list:
         new_warped = grid.warp_by_scalar("sigma", factor=0.1)
@@ -192,7 +192,7 @@ def plotting_gif(sigma_list):
         warped.point_data["sigma"][:] = sigma_sol
         plotter.write_frame()
     # plotter.view_xy()
-    #plotter.close()
+    plotter.close()
 
 
 # plotting
