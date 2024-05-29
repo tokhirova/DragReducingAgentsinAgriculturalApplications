@@ -1,12 +1,10 @@
 import dolfinx
 import ufl
-from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
-                 div, dot, ds, dx, inner, lhs, nabla_grad, rhs, sym)
+from ufl import (dx, lhs, rhs)
 import basix
 import numpy as np
 from mpi4py import MPI
 from petsc4py import PETSc
-import petsc4py
 import fene_p_parameters
 import dolfinx.fem.petsc
 

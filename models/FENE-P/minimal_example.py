@@ -1,11 +1,8 @@
 import dolfinx
-import scipy.linalg
 import scipy
 import ufl
 from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
-                 div, dot, ds, dx, inner, lhs, nabla_grad, rhs, sym)
-from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
-                               create_vector, create_matrix, set_bc)
+                 div, ds, dx, inner, lhs, nabla_grad, rhs, sym)
 import basix
 import numpy as np
 from mpi4py import MPI
