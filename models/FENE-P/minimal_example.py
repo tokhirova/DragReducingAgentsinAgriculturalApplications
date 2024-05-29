@@ -8,7 +8,6 @@ import numpy as np
 from mpi4py import MPI
 from petsc4py import PETSc
 import petsc4py
-import fene_p_parameters
 import dolfinx.fem.petsc
 from dolfinx.nls.petsc import NewtonSolver
 import pyvista
@@ -71,7 +70,9 @@ def problem_definition(sigma, sigma_n, dt):
         return 1 / (1 - ufl.tr(sigma) / b)
 
     t1 = ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi)) * dx
-    t2 = ufl.tr((ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
+    # t2 = ufl.tr(ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2]))*sigma * ufl.transpose(phi)) * dx
+    nabla_term = vector_field1 * ufl.grad(sigma[:, 0]) + vector_field2 * ufl.grad(sigma[:, 1])  # vector_field1 * grad(sigma[:,0]) + vector_field2 * grad(sigma[:,1])
+    t2 = ufl.tr(nabla_term * ufl.transpose(phi)) * dx
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
@@ -99,7 +100,7 @@ dt = T / steps
 # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
 
 sigma_n = dolfinx.fem.Function(V)
-sigma_n.vector.set(1.0)
+sigma_n.vector.set(0.0)
 
 sigma_11_solution_data = []
 sigma_12_solution_data = []
@@ -175,14 +176,14 @@ def plotting(sigma_sol):
 
 def plotting_gif(sigma_list):
     plotter = pyvista.Plotter()
-    plotter.open_gif("sigma_time.gif", fps=30)
+    plotter.open_gif("sigma_time_new.gif", fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
     # x = np.concatenate([x[:,0:2],sigma_11.reshape(-1,1)],axis=1)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
     grid.point_data["sigma"] = sigma_list[0]
     warped = grid.warp_by_scalar("sigma", factor=0.5)
-    plotter.add_mesh(warped, show_edges=True,clim=[0, np.max(sigma_list)])
-    #grid.set_active_scalars("sigma")
+    plotter.add_mesh(warped, show_edges=True, clim=[0, np.max(sigma_list)])
+    # grid.set_active_scalars("sigma")
     for sigma_sol in sigma_list:
         new_warped = grid.warp_by_scalar("sigma", factor=0.1)
         warped.points[:, :] = new_warped.points
@@ -193,10 +194,9 @@ def plotting_gif(sigma_list):
 
 
 # plotting
-#plotting(sigma_11_solution_data[-1])
+# plotting(sigma_11_solution_data[-1])
 plotting_gif(sigma_11_solution_data)
-#embed()
+# embed()
 # plotting(sigma_12)
 # plotting(sigma_21)
-#plotting(sigma_22_solution_data[1])
-
+# plotting(sigma_22_solution_data[1])
