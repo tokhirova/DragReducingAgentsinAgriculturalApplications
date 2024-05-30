@@ -16,12 +16,12 @@ from IPython import embed
 # Constants
 Lx = 1.0
 Ly = 1.0
-Nx = 25
-Ny = 25
+Nx = 50
+Ny = 50
 b = 10
 Wi = 2
+Re = 1
 
-# 1 dim test
 # mesh
 comm_t = MPI.COMM_WORLD
 domain = dolfinx.mesh.create_rectangle(comm_t, [np.array([0., 0.]), np.array([Lx, Ly])],
@@ -33,20 +33,9 @@ V = dolfinx.fem.functionspace(domain, s_el_dim)
 
 # boundary conditions
 x = ufl.SpatialCoordinate(domain)
-u_ufl = (1 + x[0] + 2 * x[1])
-
-
-def u_exact(x): return eval(str(u_ufl))
-
 
 s_D = dolfinx.fem.Function(V)
 s_D.vector.set(0.0)
-# u_D.sub(0).interpolate(u_exact)
-# u_D.sub(1).interpolate(u_exact)
-# u_D.sub(2).interpolate(u_exact)
-# u_D.sub(3).interpolate(u_exact)
-# from IPython import embed
-# embed()
 fdim = domain.topology.dim - 1
 boundary = lambda x: np.logical_or(np.logical_or(np.isclose(x[0], 0.0), np.isclose(x[1], 1.0)),
                                    np.logical_or(np.isclose(x[0], 1.0), np.isclose(x[1], 0.0)))
@@ -58,8 +47,8 @@ sigma = dolfinx.fem.Function(V)
 phi = ufl.TestFunction(V)
 
 # vector field definition u(x,y)=(-y,x)
-vector_field1 = -x[1]
-vector_field2 = x[0]
+vector_field1 = x[1]-x[1]**2
+vector_field2 = 0#x[0]
 
 
 # Problem definition
@@ -69,10 +58,10 @@ def problem_definition(sigma, sigma_n, dt):
     def A(sigma, b):
         return 1 / (1 - ufl.tr(sigma) / b)
 
-    t1 = ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi)) * dx
+    t1 = (Re*ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
     # t2 = ufl.tr(ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2]))*sigma * ufl.transpose(phi)) * dx
-    nabla_term = vector_field1 * ufl.grad(sigma[:, 0]) + vector_field2 * ufl.grad(sigma[:, 1])  # vector_field1 * grad(sigma[:,0]) + vector_field2 * grad(sigma[:,1])
-    t2 = ufl.tr(nabla_term * ufl.transpose(phi)) * dx
+    nabla_term = vector_field1 * sigma.dx(0) + vector_field2 * sigma.dx(1)
+    t2 = (Re*ufl.tr(nabla_term * ufl.transpose(phi))) * dx
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
@@ -123,6 +112,7 @@ time_values_data = np.zeros(steps + 1)
 
 for k in range(steps):
     t += dt
+    # navier stokes u= ...
     F = problem_definition(sigma, sigma_n, dt)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma,
                                                  bcs=[bc])
@@ -176,13 +166,13 @@ def plotting(sigma_sol):
 
 def plotting_gif(sigma_list):
     plotter = pyvista.Plotter()
-    plotter.open_gif("sigma_time_new.gif", fps=30)
+    plotter.open_gif("sigma_11_1_1.gif", fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
     # x = np.concatenate([x[:,0:2],sigma_11.reshape(-1,1)],axis=1)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
     grid.point_data["sigma"] = sigma_list[0]
     warped = grid.warp_by_scalar("sigma", factor=0.5)
-    plotter.add_mesh(warped, show_edges=True, clim=[0, np.max(sigma_list)])
+    plotter.add_mesh(warped, show_edges=True, clim=[np.min(sigma_list), np.max(sigma_list)])
     # grid.set_active_scalars("sigma")
     for sigma_sol in sigma_list:
         new_warped = grid.warp_by_scalar("sigma", factor=0.1)
