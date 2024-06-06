@@ -20,7 +20,11 @@ from dolfinx.geometry import bb_tree, compute_collisions_points, compute_collidi
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
 from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
+                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate)
+import sys
+
+sys.path.append('models/FENE-P/')
+import fene_p
 
 gmsh.initialize()
 
@@ -33,7 +37,6 @@ mesh_comm = MPI.COMM_WORLD
 model_rank = 0
 if mesh_comm.rank == model_rank:
     rectangle = gmsh.model.occ.addRectangle(0, 0, 0, L, H, tag=1)
-
 
 if mesh_comm.rank == model_rank:
     fluid = rectangle
@@ -66,7 +69,6 @@ if mesh_comm.rank == model_rank:
     gmsh.model.addPhysicalGroup(1, outflow, outlet_marker)
     gmsh.model.setPhysicalName(1, outlet_marker, "Outlet")
 
-
 # Create distance field from obstacle.
 # Add threshold of mesh sizes based on the distance field
 # LcMax -                  /--------
@@ -74,7 +76,7 @@ if mesh_comm.rank == model_rank:
 # LcMin -o---------/
 #        |         |       |
 #       Point    DistMin DistMax
-res_min = r/3
+res_min = r / 3
 if mesh_comm.rank == model_rank:
     distance_field = gmsh.model.mesh.field.add("Distance")
     threshold_field = gmsh.model.mesh.field.add("Threshold")
@@ -100,19 +102,20 @@ mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
 ft.name = "Facet markers"
 
 t = 0
-T = 0.02                    # Final time
-dt = 1 / 1600                 # Time step size
+T = 0.02  # Final time
+dt = 1 / 1600  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 mu = Constant(mesh, PETSc.ScalarType(0.001))  # Dynamic viscosity
-rho = Constant(mesh, PETSc.ScalarType(1))     # Density
+rho = Constant(mesh, PETSc.ScalarType(1))  # Density
 
-v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim, ))
+v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
 s_cg1 = element("Lagrange", mesh.topology.cell_name(), 1)
 V = functionspace(mesh, v_cg2)
 Q = functionspace(mesh, s_cg1)
 
 fdim = mesh.topology.dim - 1
+
 
 # Define boundary conditions
 
@@ -123,7 +126,7 @@ class InletVelocity():
 
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41**2)
+        values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
         return values
 
 
@@ -203,7 +206,6 @@ n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 u_t = inner(as_vector((n[1], -n[0])), u_)
 
 if mesh.comm.rank == 0:
-
     t_u = np.zeros(num_steps, dtype=np.float64)
     t_p = np.zeros(num_steps, dtype=np.float64)
 
@@ -217,6 +219,7 @@ if mesh.comm.rank == 0:
     p_diff = np.zeros(num_steps, dtype=PETSc.ScalarType)
 
 from pathlib import Path
+
 folder = Path("results/results")
 folder.mkdir(exist_ok=True, parents=True)
 vtx_u = VTXWriter(mesh.comm, "results/dfg2D-3-u.bp", [u_], engine="BP4")
@@ -226,6 +229,22 @@ vtx_p.write(t)
 progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)
 
 u_sol_1 = []
+u_sol_2 = []
+
+# FENE-P Init
+S, sigma, phi_tf = fene_p.function_space(mesh)
+x = SpatialCoordinate(mesh)
+bc = fene_p.boundary_conditions(mesh, S, x)
+
+# vector_field1, vector_field2 = fene_p.vector_field(x)
+# steps = 100
+# T = 1
+# t = t0 = 0
+# num_it = int((T - t0) / steps)
+# dt = T / steps
+
+sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data = fene_p.solution_initialization(
+    num_steps, S)
 
 for i in range(num_steps):
     progress.update(1)
@@ -269,8 +288,19 @@ for i in range(num_steps):
     solver3.solve(b3, u_.vector)
     u_.x.scatter_forward()
 
+    div_tau = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf)
+
+    fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
+                          sigma_22_solution_data, time_values_data, i, t)
+
+    sigma.x.scatter_forward()
+    sigma_n.x.array[:] = sigma.x.array
+
     laenge = int(u_.x.array.shape[0] / 2)
-    u_sol_1.append(u_.x.array[2 * k] for k in range(laenge))
+    u_gen_1 = (u_.x.array[2 * k] for k in range(laenge))
+    u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
+    u_sol_1.append(list(u_gen_1))
+    u_sol_2.append(list(u_gen_2))
 
     # Write solutions to file
     vtx_u.write(t)
@@ -309,38 +339,37 @@ for i in range(num_steps):
 vtx_u.close()
 vtx_p.close()
 
-if mesh.comm.rank == 0:
-    if not os.path.exists("results/figures"):
-        os.mkdir("results/figures")
-    num_velocity_dofs = V.dofmap.index_map_bs * V.dofmap.index_map.size_global
-    num_pressure_dofs = Q.dofmap.index_map_bs * V.dofmap.index_map.size_global
+# if mesh.comm.rank == 0:
+#     if not os.path.exists("results/figures"):
+#         os.mkdir("results/figures")
+#     num_velocity_dofs = V.dofmap.index_map_bs * V.dofmap.index_map.size_global
+#     num_pressure_dofs = Q.dofmap.index_map_bs * V.dofmap.index_map.size_global
+#
+#     fig = plt.figure(figsize=(25, 8))
+#     l1 = plt.plot(t_p, p_diff, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
+#     # l2 = plt.plot(turek[1:, 1], turek_p[1:, 6] - turek_p[1:, -1], marker="x", markevery=50,
+#     #              linestyle="", markersize=4, label="FEATFLOW (42016 dofs)")
+#     plt.title("Pressure difference")
+#     plt.grid()
+#     plt.legend()
+#     plt.savefig("figures/pressure_comparison.png")
 
 
-
-
-
-    fig = plt.figure(figsize=(25, 8))
-    l1 = plt.plot(t_p, p_diff, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
-    #l2 = plt.plot(turek[1:, 1], turek_p[1:, 6] - turek_p[1:, -1], marker="x", markevery=50,
-    #              linestyle="", markersize=4, label="FEATFLOW (42016 dofs)")
-    plt.title("Pressure difference")
-    plt.grid()
-    plt.legend()
-    plt.savefig("figures/pressure_comparison.png")
-
-def plottin_gif(u_list):
+def plotting_gif(u_list,V):
     plotter = pyvista.Plotter()
     plotter.open_gif("u1.gif", fps=30)
-    topology, cell_types, geometry =dolfinx.plot.vtk_mesh(V)
+    topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
-    grid.point_data["u1"] = u_list[0]
+    grid.point_data["u"] = u_list[0]
     warped = grid.warp_by_scalar("u", factor=0.5)
-    plotter.add_mesh(warped, show_edges=true, clin=[np.min(u_list), np.max(u_list)])
+    plotter.add_mesh(warped, show_edges=True, clim=[np.min(u_list), np.max(u_list)])
     for u_sol in u_list:
-        new_warped = grid.warp_by_scalar("u1", factor=0.1)
+        new_warped = grid.warp_by_scalar("u", factor=0.1)
         warped.points[:, :] = new_warped.points
-        warped.point_data["u1"][:]=u_sol
+        warped.point_data["u"][:] = u_sol
         plotter.write_frame()
     plotter.close()
 
-plottin_gif(u_sol_1)
+
+#plotting_gif(u_sol_1,V)
+fene_p.plotting_gif(sigma_11_solution_data,S)
