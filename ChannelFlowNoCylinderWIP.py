@@ -22,87 +22,18 @@ from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate)
 import sys
+import pickle
 
 sys.path.append('models/FENE-P/')
 import fene_p
+import mesh_init
 
 gmsh.initialize()
-
-L = 2.2
-H = 0.41
-c_x = c_y = 0.2
-r = 0.05
 gdim = 2
-mesh_comm = MPI.COMM_WORLD
-model_rank = 0
-if mesh_comm.rank == model_rank:
-    rectangle = gmsh.model.occ.addRectangle(0, 0, 0, L, H, tag=1)
-
-if mesh_comm.rank == model_rank:
-    fluid = rectangle
-    gmsh.model.occ.synchronize()
-
-fluid_marker = 1
-if mesh_comm.rank == model_rank:
-    volumes = gmsh.model.getEntities(dim=gdim)
-    assert (len(volumes) == 1)
-    gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], fluid_marker)
-    gmsh.model.setPhysicalName(volumes[0][0], fluid_marker, "Fluid")
-
-inlet_marker, outlet_marker, wall_marker = 2, 3, 4
-inflow, outflow, walls = [], [], []
-if mesh_comm.rank == model_rank:
-    boundaries = gmsh.model.getBoundary(volumes, oriented=False)
-    for boundary in boundaries:
-        center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
-        if np.allclose(center_of_mass, [0, H / 2, 0]):
-            inflow.append(boundary[1])
-        elif np.allclose(center_of_mass, [L, H / 2, 0]):
-            outflow.append(boundary[1])
-        elif np.allclose(center_of_mass, [L / 2, H, 0]) or np.allclose(center_of_mass, [L / 2, 0, 0]):
-            walls.append(boundary[1])
-
-    gmsh.model.addPhysicalGroup(1, walls, wall_marker)
-    gmsh.model.setPhysicalName(1, wall_marker, "Walls")
-    gmsh.model.addPhysicalGroup(1, inflow, inlet_marker)
-    gmsh.model.setPhysicalName(1, inlet_marker, "Inlet")
-    gmsh.model.addPhysicalGroup(1, outflow, outlet_marker)
-    gmsh.model.setPhysicalName(1, outlet_marker, "Outlet")
-
-# Create distance field from obstacle.
-# Add threshold of mesh sizes based on the distance field
-# LcMax -                  /--------
-#                      /
-# LcMin -o---------/
-#        |         |       |
-#       Point    DistMin DistMax
-res_min = r / 3
-if mesh_comm.rank == model_rank:
-    distance_field = gmsh.model.mesh.field.add("Distance")
-    threshold_field = gmsh.model.mesh.field.add("Threshold")
-    gmsh.model.mesh.field.setNumber(threshold_field, "IField", distance_field)
-    gmsh.model.mesh.field.setNumber(threshold_field, "LcMin", res_min)
-    gmsh.model.mesh.field.setNumber(threshold_field, "LcMax", 0.25 * H)
-    gmsh.model.mesh.field.setNumber(threshold_field, "DistMin", r)
-    gmsh.model.mesh.field.setNumber(threshold_field, "DistMax", 2 * H)
-    min_field = gmsh.model.mesh.field.add("Min")
-    gmsh.model.mesh.field.setNumbers(min_field, "FieldsList", [threshold_field])
-    gmsh.model.mesh.field.setAsBackgroundMesh(min_field)
-
-if mesh_comm.rank == model_rank:
-    gmsh.option.setNumber("Mesh.Algorithm", 8)
-    gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
-    gmsh.option.setNumber("Mesh.RecombineAll", 1)
-    gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)
-    gmsh.model.mesh.generate(gdim)
-    gmsh.model.mesh.setOrder(2)
-    gmsh.model.mesh.optimize("Netgen")
-
-mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
-ft.name = "Facet markers"
+mesh, ft, inlet_marker, wall_marker, outlet_marker = mesh_init.create_mesh(gdim)
 
 t = 0
-T = 0.02  # Final time
+T = 0.2#2.0  # Final time
 dt = 1 / 1600  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
@@ -157,10 +88,20 @@ p_ = Function(Q)
 p_.name = "p"
 phi = Function(Q)
 
+# FENE-P Init
+S, sigma, phi_tf = fene_p.function_space(mesh)
+x = SpatialCoordinate(mesh)
+bc = fene_p.boundary_conditions(mesh, S, x)
+eps = 0.1
+b = 30
+Wi = 180
+
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
+div_tau = dot(div((eps * fene_p.A(sigma, b)) / Wi * sigma), v)
 F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+F1 += div_tau * dx
 F1 += dot(f, v) * dx
 a1 = form(lhs(F1))
 L1 = form(rhs(F1))
@@ -231,11 +172,6 @@ progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)
 u_sol_1 = []
 u_sol_2 = []
 
-# FENE-P Init
-S, sigma, phi_tf = fene_p.function_space(mesh)
-x = SpatialCoordinate(mesh)
-bc = fene_p.boundary_conditions(mesh, S, x)
-
 # vector_field1, vector_field2 = fene_p.vector_field(x)
 # steps = 100
 # T = 1
@@ -288,7 +224,7 @@ for i in range(num_steps):
     solver3.solve(b3, u_.vector)
     u_.x.scatter_forward()
 
-    div_tau = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf)
+    fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf)
 
     fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                           sigma_22_solution_data, time_values_data, i, t)
@@ -339,6 +275,21 @@ for i in range(num_steps):
 vtx_u.close()
 vtx_p.close()
 
+with open('results/arrays/sigma11.npy', 'wb') as f:
+    np.save(f, np.array(sigma_11_solution_data))
+with open('results/arrays/sigma12.npy', 'wb') as f:
+    np.save(f, np.array(sigma_12_solution_data))
+with open('results/arrays/sigma21.npy', 'wb') as f:
+    np.save(f, np.array(sigma_21_solution_data))
+with open('results/arrays/sigma22.npy', 'wb') as f:
+    np.save(f, np.array(sigma_22_solution_data))
+
+with open('results/arrays/u1.npy', 'wb') as f:
+    np.save(f, np.array(u_sol_1))
+with open('results/arrays/u2.npy', 'wb') as f:
+    np.save(f, np.array(u_sol_2))
+
+
 # if mesh.comm.rank == 0:
 #     if not os.path.exists("results/figures"):
 #         os.mkdir("results/figures")
@@ -355,7 +306,7 @@ vtx_p.close()
 #     plt.savefig("figures/pressure_comparison.png")
 
 
-def plotting_gif(u_list,V):
+def plotting_gif(u_list, V):
     plotter = pyvista.Plotter()
     plotter.open_gif("u1.gif", fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
@@ -371,5 +322,5 @@ def plotting_gif(u_list,V):
     plotter.close()
 
 
-#plotting_gif(u_sol_1,V)
-fene_p.plotting_gif(sigma_11_solution_data,S)
+#plotting_gif(u_sol_1, V)
+# fene_p.plotting_gif(sigma_11_solution_data, S)

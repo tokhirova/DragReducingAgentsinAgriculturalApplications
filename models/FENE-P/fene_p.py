@@ -15,15 +15,11 @@ from IPython import embed
 
 # conda activate fenicsx-env
 # Constants
-Lx = 1.0
-Ly = 1.0
-Nx = 50
-Ny = 50
-b = 10
-Wi = 2
-Re = 1
+
+b = 30
+Wi = 50
+Re = 180
 alpha = 0.5
-eps = 0.5
 
 
 def function_space(domain):
@@ -73,8 +69,7 @@ def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi):
     tripple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
     extra_diffusion = (alpha * tripple_dot) * dx
     F_new = t1 + t2 - t3 - t4 + t5 + extra_diffusion
-    div_tau = ufl.div((eps * A(sigma, b)) / Wi * sigma)
-    return F_new, div_tau
+    return F_new
 
 
 def solution_initialization(steps, V):
@@ -96,14 +91,13 @@ def solution_initialization(steps, V):
 
 
 def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi):
-    F, div_tau = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi)
-    problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma, bcs=[bc])
+    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi)
+    problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
     solver = NewtonSolver(MPI.COMM_WORLD, problem)
     solver.report = True
     n, converged = solver.solve(sigma)
     assert (converged)
     print(f"Number of interations: {n:d}")
-    return div_tau
 
 
 def save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
@@ -150,6 +144,10 @@ def plotting_gif(sigma_list, V):
 
 
 def pipeline():
+    Lx = 1.0
+    Ly = 1.0
+    Nx = 50
+    Ny = 50
     # mesh
     comm_t = MPI.COMM_WORLD
     domain = dolfinx.mesh.create_rectangle(comm_t, [np.array([0., 0.]), np.array([Lx, Ly])],
@@ -170,7 +168,7 @@ def pipeline():
 
     for k in range(steps):
         t += dt
-        div_tau = solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi)
+        solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi)
 
         save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                        sigma_22_solution_data, time_values_data, k, t)
