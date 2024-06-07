@@ -30,10 +30,10 @@ import mesh_init
 
 gmsh.initialize()
 gdim = 2
-mesh, ft, inlet_marker, wall_marker, outlet_marker = mesh_init.create_mesh(gdim)
+mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
 t = 0
-T = 0.2#2.0  # Final time
+T = 5.0  # Final time
 dt = 1 / 1600  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
@@ -70,10 +70,14 @@ bcu_inflow = dirichletbc(u_inlet, locate_dofs_topological(V, fdim, ft.find(inlet
 u_nonslip = np.array((0,) * mesh.geometry.dim, dtype=PETSc.ScalarType)
 bcu_walls = dirichletbc(u_nonslip, locate_dofs_topological(V, fdim, ft.find(wall_marker)), V)
 
-bcu = [bcu_inflow, bcu_walls]
+# Obstacle
+bcu_obstacle = dirichletbc(u_nonslip, locate_dofs_topological(V, fdim, ft.find(obstacle_marker)), V)
+bcu = [bcu_inflow, bcu_obstacle, bcu_walls]
+
 # Outlet
 bcp_outlet = dirichletbc(PETSc.ScalarType(0), locate_dofs_topological(Q, fdim, ft.find(outlet_marker)), Q)
 bcp = [bcp_outlet]
+
 
 u = TrialFunction(V)
 v = TestFunction(V)
@@ -203,7 +207,7 @@ for i in range(num_steps):
     solver1.solve(b1, u_s.vector)
     u_s.x.scatter_forward()
 
-    # Step 2: Pressure corrrection step
+    # Step 2: Pressure correction step
     with b2.localForm() as loc:
         loc.set(0)
     assemble_vector(b2, L2)
