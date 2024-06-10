@@ -52,3 +52,9 @@ elif plot == 5:
 elif plot == 6:
     with open("results/arrays/sigma22.npy", "rb") as f:
         plotting_gif(np.load(f), S, "plots/sigma_22_new.gif", "sigma22")
+elif plot == 7:
+    with open("results/arrays/u1NS.npy", "rb") as f:
+        plotting_gif(np.load(f), V, "plots/u2NS_new.gif", "u2NS")
+elif plot == 8:
+    with open("results/arrays/u2NS.npy", "rb") as f:
+        plotting_gif(np.load(f), V, "plots/u2NS_new.gif", "u2NS")
