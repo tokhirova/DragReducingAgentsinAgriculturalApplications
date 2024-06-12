@@ -14,12 +14,6 @@ import pyvista
 from IPython import embed
 
 # conda activate fenicsx-env
-# Constants
-
-b = 30
-Wi = 50
-Re = 180
-alpha = 0.5
 
 
 def function_space(domain):
@@ -45,29 +39,33 @@ def boundary_conditions(domain, V, x):
     return bc
 
 
-def vector_field(x):
+def vector_field(x,mesh):
     # vector field definition u(x,y)=(y-y²,0)
-    u1 = x[1] - x[1] ** 2
-    u2 = 0  # x[0]
-    return u1, u2
+    v_cg2 = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
+    V = dolfinx.fem.functionspace(mesh, v_cg2)
+    f = dolfinx.fem.Function(V)
+    f.vector.set(0.0)
+    u1 = -x[1]#x[1] - x[1] ** 2
+    u2 = x[0] # x[0]
+    return [u1,u2]
 
 
 def A(sigma, b):
     return 1 / (1 - ufl.tr(sigma) / b)
 
 
-def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi):
+def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
     # Problem definition
-    t1 = (Re * ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
+    t1 = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
     # t2 = ufl.tr(ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2]))*sigma * ufl.transpose(phi)) * dx
     nabla_term = vector_field1 * sigma.dx(0) + vector_field2 * sigma.dx(1)
-    t2 = (Re * ufl.tr(nabla_term * ufl.transpose(phi))) * dx
+    t2 = (ufl.tr(nabla_term * ufl.transpose(phi))) * dx
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
     t5 = (A(sigma, b) / Wi * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
-    tripple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
-    extra_diffusion = (alpha * tripple_dot) * dx
+    triple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
+    extra_diffusion = (alpha * triple_dot) * dx
     F_new = t1 + t2 - t3 - t4 + t5 + extra_diffusion
     return F_new
 
@@ -90,14 +88,14 @@ def solution_initialization(steps, V):
     return sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data
 
 
-def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi):
-    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi)
+def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha):
+    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi,b, Wi, alpha)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
     solver = NewtonSolver(MPI.COMM_WORLD, problem)
     solver.report = True
     n, converged = solver.solve(sigma)
     assert (converged)
-    print(f"Number of interations: {n:d}")
+    #print(f"Number of iterations: {n:d}")
 
 
 def save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
@@ -126,7 +124,7 @@ def plotting(sigma_sol, V):
 
 def plotting_gif(sigma_list, V):
     plotter = pyvista.Plotter()
-    plotter.open_gif("sigma_11_on_new_domain.gif", fps=30)
+    plotter.open_gif("sigma_11_with_vector_field.gif", fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
     # x = np.concatenate([x[:,0:2],sigma_11.reshape(-1,1)],axis=1)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
@@ -148,6 +146,7 @@ def pipeline():
     Ly = 1.0
     Nx = 50
     Ny = 50
+    b, Wi, alpha = 30, 50, 0.1
     # mesh
     comm_t = MPI.COMM_WORLD
     domain = dolfinx.mesh.create_rectangle(comm_t, [np.array([0., 0.]), np.array([Lx, Ly])],
@@ -156,7 +155,9 @@ def pipeline():
     V, sigma, phi = function_space(domain)
     x = ufl.SpatialCoordinate(domain)
     bc = boundary_conditions(domain, V, x)
-    vector_field1, vector_field2 = vector_field(x)
+    u = vector_field(x, domain)
+    vector_field1 = u[0]
+    vector_field2 = u[1]
     steps = 100
     T = 1
     t = t0 = 0
@@ -168,7 +169,7 @@ def pipeline():
 
     for k in range(steps):
         t += dt
-        solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi)
+        solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha)
 
         save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                        sigma_22_solution_data, time_values_data, k, t)
@@ -181,8 +182,8 @@ def pipeline():
 
 # plotting
 # plotting(sigma_11_solution_data[-1])
-# sigma_11_solution_data = pipeline()
-# plotting_gif(sigma_11_solution_data)
+#pipeline()
+#plotting_gif(sigma_11_solution_data,V)
 # embed()
 # plotting(sigma_12)
 # plotting(sigma_21)

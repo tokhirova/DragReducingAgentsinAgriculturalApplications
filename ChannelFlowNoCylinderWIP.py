@@ -7,7 +7,6 @@ import tqdm.autonotebook
 import pyvista
 from mpi4py import MPI
 from petsc4py import PETSc
-
 from basix.ufl import element
 
 from dolfinx.cpp.mesh import to_type, cell_entity_type
@@ -33,12 +32,17 @@ gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
 t = 0
-T = 5.0  # Final time
-dt = 1 / 1600  # Time step size
+T = 2.0 # Final time
+dt = 1 / (2*1600)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
-mu = Constant(mesh, PETSc.ScalarType(0.001))  # Dynamic viscosity
-rho = Constant(mesh, PETSc.ScalarType(1))  # Density
+# solvent ratio
+beta = 0.9
+mu = Constant(mesh, PETSc.ScalarType(beta))  # Dynamic viscosity
+Re = Constant(mesh, PETSc.ScalarType(180))  # Density
+b = 30   # length
+Wi = 50#180
+alpha = 0.1
 
 v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
 s_cg1 = element("Lagrange", mesh.topology.cell_name(), 1)
@@ -96,14 +100,13 @@ phi = Function(Q)
 S, sigma, phi_tf = fene_p.function_space(mesh)
 x = SpatialCoordinate(mesh)
 bc = fene_p.boundary_conditions(mesh, S, x)
-eps = 0.1
-b = 30
-Wi = 180
+
+
 
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
-div_tau = dot(div((eps * fene_p.A(sigma, b)) / Wi * sigma), v)
-F1 = rho / k * dot(u - u_n, v) * dx
-F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+div_tau = dot(div(((1-mu) * fene_p.A(sigma, b)) / Wi * sigma), v)
+F1 = Re / k * dot(u - u_n, v) * dx
+F1 += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 F1 += div_tau * dx
 F1 += dot(f, v) * dx
@@ -113,13 +116,13 @@ A1 = create_matrix(a1)
 b1 = create_vector(L1)
 
 a2 = form(dot(grad(p), grad(q)) * dx)
-L2 = form(-rho / k * dot(div(u_s), q) * dx)
+L2 = form(-Re / k * dot(div(u_s), q) * dx)
 A2 = assemble_matrix(a2, bcs=bcp)
 A2.assemble()
 b2 = create_vector(L2)
 
-a3 = form(rho * dot(u, v) * dx)
-L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+a3 = form(Re * dot(u, v) * dx)
+L3 = form(Re * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
 A3 = assemble_matrix(a3)
 A3.assemble()
 b3 = create_vector(L3)
@@ -147,8 +150,16 @@ pc3 = solver3.getPC()
 pc3.setType(PETSc.PC.Type.SOR)
 
 n = -FacetNormal(mesh)  # Normal pointing out of obstacle
-
+dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 u_t = inner(as_vector((n[1], -n[0])), u_)
+drag = form(2 / 0.1 * (mu / Re * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)
+lift = form(-2 / 0.1 * (mu / Re * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)
+if mesh.comm.rank == 0:
+    C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
+    C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
+    t_u = np.zeros(num_steps, dtype=np.float64)
+    t_p = np.zeros(num_steps, dtype=np.float64)
+
 
 if mesh.comm.rank == 0:
     t_u = np.zeros(num_steps, dtype=np.float64)
@@ -165,7 +176,7 @@ if mesh.comm.rank == 0:
 
 from pathlib import Path
 
-folder = Path("results/results")
+folder = Path("results")
 folder.mkdir(exist_ok=True, parents=True)
 vtx_u = VTXWriter(mesh.comm, "results/dfg2D-3-u.bp", [u_], engine="BP4")
 vtx_p = VTXWriter(mesh.comm, "results/dfg2D-3-p.bp", [p_], engine="BP4")
@@ -228,7 +239,7 @@ for i in range(num_steps):
     solver3.solve(b3, u_.vector)
     u_.x.scatter_forward()
 
-    fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf)
+    fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
 
     fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                           sigma_22_solution_data, time_values_data, i, t)
@@ -252,9 +263,10 @@ for i in range(num_steps):
         loc_.copy(loc_n)
 
     # Compute physical quantities
-    # For this to work in paralell, we gather contributions from all processors
+    # For this to work in parallel, we gather contributions from all processors
     # to processor zero and sum the contributions.
-
+    drag_coeff = mesh.comm.gather(assemble_scalar(drag), root=0)
+    lift_coeff = mesh.comm.gather(assemble_scalar(lift), root=0)
     p_front = None
     if len(front_cells) > 0:
         p_front = p_.eval(points[0], front_cells[:1])
@@ -266,7 +278,8 @@ for i in range(num_steps):
     if mesh.comm.rank == 0:
         t_u[i] = t
         t_p[i] = t - dt / 2
-
+        C_D[i] = sum(drag_coeff)
+        C_L[i] = sum(lift_coeff)
         # Choose first pressure that is found from the different processors
         for pressure in p_front:
             if pressure is not None:
@@ -279,35 +292,50 @@ for i in range(num_steps):
 vtx_u.close()
 vtx_p.close()
 
-with open('results/arrays/sigma11.npy', 'wb') as f:
+experiment_number = 4
+np_path = f'results/arrays/experiments/{experiment_number}/'
+with open(np_path+'sigma11.npy', 'wb') as f:
     np.save(f, np.array(sigma_11_solution_data))
-with open('results/arrays/sigma12.npy', 'wb') as f:
+with open(np_path+'sigma12.npy', 'wb') as f:
     np.save(f, np.array(sigma_12_solution_data))
-with open('results/arrays/sigma21.npy', 'wb') as f:
+with open(np_path+'sigma21.npy', 'wb') as f:
     np.save(f, np.array(sigma_21_solution_data))
-with open('results/arrays/sigma22.npy', 'wb') as f:
+with open(np_path+'sigma22.npy', 'wb') as f:
     np.save(f, np.array(sigma_22_solution_data))
 
-with open('results/arrays/u1.npy', 'wb') as f:
+with open(np_path+'u1.npy', 'wb') as f:
     np.save(f, np.array(u_sol_1))
-with open('results/arrays/u2.npy', 'wb') as f:
+with open(np_path+'u2.npy', 'wb') as f:
     np.save(f, np.array(u_sol_2))
 
+plot_path = f"plots/experiments/{experiment_number}/"
+if mesh.comm.rank == 0:
+    if not os.path.exists("results/figures"):
+        os.mkdir("results/figures")
+    num_velocity_dofs = V.dofmap.index_map_bs * V.dofmap.index_map.size_global
+    num_pressure_dofs = Q.dofmap.index_map_bs * V.dofmap.index_map.size_global
 
-# if mesh.comm.rank == 0:
-#     if not os.path.exists("results/figures"):
-#         os.mkdir("results/figures")
-#     num_velocity_dofs = V.dofmap.index_map_bs * V.dofmap.index_map.size_global
-#     num_pressure_dofs = Q.dofmap.index_map_bs * V.dofmap.index_map.size_global
-#
-#     fig = plt.figure(figsize=(25, 8))
-#     l1 = plt.plot(t_p, p_diff, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
-#     # l2 = plt.plot(turek[1:, 1], turek_p[1:, 6] - turek_p[1:, -1], marker="x", markevery=50,
-#     #              linestyle="", markersize=4, label="FEATFLOW (42016 dofs)")
-#     plt.title("Pressure difference")
-#     plt.grid()
-#     plt.legend()
-#     plt.savefig("figures/pressure_comparison.png")
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(t_u, C_D, label=r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
+    plt.title("Drag coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path+"drag_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(t_u, C_L, label=r"FEniCSx  ({0:d} dofs)".format(
+        num_velocity_dofs + num_pressure_dofs), linewidth=2)
+    plt.title("Lift coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path+"lift_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(t_p, p_diff, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
+    plt.title("Pressure difference")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path+"pressure_comparison.png")
 
 
 def plotting_gif(u_list, V):
