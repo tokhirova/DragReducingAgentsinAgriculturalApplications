@@ -32,8 +32,8 @@ gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
 t = 0
-T = 2.0 # Final time
-dt = 1 / (2*1600)  # Time step size
+T = 8.0 # Final time
+dt = 1 / (1600)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 # solvent ratio
@@ -108,8 +108,13 @@ div_tau = dot(div(((1-mu) * fene_p.A(sigma, b)) / Wi * sigma), v)
 F1 = Re / k * dot(u - u_n, v) * dx
 F1 += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
-F1 += div_tau * dx
-F1 += dot(f, v) * dx
+# left = Re / k * dot(u - u_n, v) * dx
+# left += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+# left += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+# right = div_tau * dx
+# right += dot(f, v) * dx
+F1 -= div_tau * dx
+F1 -= dot(f, v) * dx
 a1 = form(lhs(F1))
 L1 = form(rhs(F1))
 A1 = create_matrix(a1)
@@ -239,8 +244,9 @@ for i in range(num_steps):
     solver3.solve(b3, u_.vector)
     u_.x.scatter_forward()
 
-    fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
-
+    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
+    if crash:
+        break
     fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                           sigma_22_solution_data, time_values_data, i, t)
 

@@ -19,7 +19,7 @@ S = dolfinx.fem.functionspace(mesh, s_el_dim)
 
 def plotting_gif(list, fs, path, var_name):
     plotter = pyvista.Plotter()
-    plotter.open_gif(path, fps=30)
+    plotter.open_gif(path, fps=10)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(fs)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
     grid.point_data[var_name] = list[0]
@@ -34,7 +34,7 @@ def plotting_gif(list, fs, path, var_name):
 
 
 plot = 3
-i = 2
+i = 4
 if plot == 1:
     with open(f"results/arrays/experiments/{i}/u1.npy", "rb") as f:
         plotting_gif(np.load(f), V, f"plots/experiments/u1_new.gif", "u1")

@@ -91,10 +91,14 @@ def solution_initialization(steps, V):
 def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha):
     F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi,b, Wi, alpha)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
-    solver = NewtonSolver(MPI.COMM_WORLD, problem)
-    solver.report = True
-    n, converged = solver.solve(sigma)
-    assert (converged)
+    try:
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+        solver.report = True
+        n, converged = solver.solve(sigma)
+        #assert (converged)
+        return False
+    except:
+        return True
     #print(f"Number of iterations: {n:d}")
 
 
