@@ -19,7 +19,7 @@ S = dolfinx.fem.functionspace(mesh, s_el_dim)
 
 def plotting_gif(list, fs, path, var_name):
     plotter = pyvista.Plotter()
-    plotter.open_gif(path, fps=10)
+    plotter.open_gif(path, fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(fs)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
     grid.point_data[var_name] = list[0]
@@ -33,26 +33,26 @@ def plotting_gif(list, fs, path, var_name):
     plotter.close()
 
 
-plot = 3
-i = 4
+plot = 1
+i = 5
 if plot == 1:
     with open(f"results/arrays/experiments/{i}/u1.npy", "rb") as f:
-        plotting_gif(np.load(f), V, f"plots/experiments/u1_new.gif", "u1")
+        plotting_gif(np.load(f), V, f"plots/experiments/{i}/u1_new.gif", "u1")
 elif plot == 2:
     with open(f"results/arrays/experiments/{i}/u2.npy", "rb") as f:
-        plotting_gif(np.load(f), V, f"plots/experiments/u2_new.gif", "u2")
+        plotting_gif(np.load(f), V, f"plots/experiments/{i}/u2_new.gif", "u2")
 elif plot == 3:
     with open(f"results/arrays/experiments/{i}/sigma11.npy", "rb") as f:
-        plotting_gif(np.load(f), S, f"plots/experiments/sigma_11_new.gif", "sigma11")
+        plotting_gif(np.load(f), S, f"plots/experiments/{i}/sigma_11_new.gif", "sigma11")
 elif plot == 4:
     with open(f"results/arrays/experiments/{i}/sigma12.npy", "rb") as f:
-        plotting_gif(np.load(f), S, f"plots/experiments/sigma_12_new.gif", "sigma12")
+        plotting_gif(np.load(f), S, f"plots/experiments/{i}/sigma_12_new.gif", "sigma12")
 elif plot == 5:
     with open(f"results/arrays/experiments/{i}/sigma21.npy", "rb") as f:
-        plotting_gif(np.load(f), S, f"plots/experiments/sigma_21_new.gif", "sigma21")
+        plotting_gif(np.load(f), S, f"plots/experiments/{i}/sigma_21_new.gif", "sigma21")
 elif plot == 6:
     with open(f"results/arrays/experiments/{i}/sigma22.npy", "rb") as f:
-        plotting_gif(np.load(f), S, f"plots/experiments/sigma_22_new.gif", "sigma22")
+        plotting_gif(np.load(f), S, f"plots/experiments/{i}/sigma_22_new.gif", "sigma22")
 elif plot == 7:
     with open("results/arrays/u1NS.npy", "rb") as f:
         plotting_gif(np.load(f), V, "plots/u1NS_new.gif", "u1NS")

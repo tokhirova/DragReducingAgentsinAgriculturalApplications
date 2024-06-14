@@ -19,7 +19,7 @@ from dolfinx.geometry import bb_tree, compute_collisions_points, compute_collidi
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
 from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate)
+                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv, sqrt)
 import sys
 import pickle
 
@@ -36,10 +36,12 @@ T = 8.0 # Final time
 dt = 1 / (1600)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
-# solvent ratio
-beta = 0.9
-mu = Constant(mesh, PETSc.ScalarType(beta))  # Dynamic viscosity
-Re = Constant(mesh, PETSc.ScalarType(180))  # Density
+
+beta = Constant(mesh, PETSc.ScalarType(0.9))  # solvent ratio
+mu = Constant(mesh, PETSc.ScalarType(0.001))  # Dynamic viscosity
+Re = Constant(mesh, PETSc.ScalarType(100))  # Density
+rho = Constant(mesh, PETSc.ScalarType(1))  # Density
+
 b = 30   # length
 Wi = 50#180
 alpha = 0.1
@@ -102,18 +104,17 @@ x = SpatialCoordinate(mesh)
 bc = fene_p.boundary_conditions(mesh, S, x)
 
 
-
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
-div_tau = dot(div(((1-mu) * fene_p.A(sigma, b)) / Wi * sigma), v)
-F1 = Re / k * dot(u - u_n, v) * dx
-F1 += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+div_tau = (1-mu)/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+F1 = Re * rho / k * dot(u - u_n, v) * dx
+F1 += Re * rho * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # left = Re / k * dot(u - u_n, v) * dx
 # left += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 # left += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # right = div_tau * dx
 # right += dot(f, v) * dx
-F1 -= div_tau * dx
+F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
 a1 = form(lhs(F1))
 L1 = form(rhs(F1))
@@ -121,13 +122,13 @@ A1 = create_matrix(a1)
 b1 = create_vector(L1)
 
 a2 = form(dot(grad(p), grad(q)) * dx)
-L2 = form(-Re / k * dot(div(u_s), q) * dx)
+L2 = form(-rho / k * dot(div(u_s), q) * dx)
 A2 = assemble_matrix(a2, bcs=bcp)
 A2.assemble()
 b2 = create_vector(L2)
 
-a3 = form(Re * dot(u, v) * dx)
-L3 = form(Re * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+a3 = form(rho * dot(u, v) * dx)
+L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
 A3 = assemble_matrix(a3)
 A3.assemble()
 b3 = create_vector(L3)
@@ -156,12 +157,15 @@ pc3.setType(PETSc.PC.Type.SOR)
 
 n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
+dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
+outlet_impulse = form(sqrt(u_[0]**2+u_[1]**2))
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2 / 0.1 * (mu / Re * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)
-lift = form(-2 / 0.1 * (mu / Re * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)
+drag = form(2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)
+lift = form(-2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
+    C_S = np.zeros(num_steps, dtype=PETSc.ScalarType)
     t_u = np.zeros(num_steps, dtype=np.float64)
     t_p = np.zeros(num_steps, dtype=np.float64)
 
@@ -191,6 +195,7 @@ progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)
 
 u_sol_1 = []
 u_sol_2 = []
+u_magnitude = []
 
 # vector_field1, vector_field2 = fene_p.vector_field(x)
 # steps = 100
@@ -246,6 +251,7 @@ for i in range(num_steps):
 
     crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
     if crash:
+        print("pipeline crashed!!")
         break
     fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                           sigma_22_solution_data, time_values_data, i, t)
@@ -256,8 +262,11 @@ for i in range(num_steps):
     laenge = int(u_.x.array.shape[0] / 2)
     u_gen_1 = (u_.x.array[2 * k] for k in range(laenge))
     u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
+    u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
     u_sol_1.append(list(u_gen_1))
     u_sol_2.append(list(u_gen_2))
+    u_mag_gen = (np.sqrt((u_.x.array[2 * k])**2+(u_.x.array[2 * k + 1])**2) for k in range(laenge))
+    u_magnitude.append(list(u_mag_gen))
 
     # Write solutions to file
     vtx_u.write(t)
@@ -273,6 +282,7 @@ for i in range(num_steps):
     # to processor zero and sum the contributions.
     drag_coeff = mesh.comm.gather(assemble_scalar(drag), root=0)
     lift_coeff = mesh.comm.gather(assemble_scalar(lift), root=0)
+    outlet_impulse_coeff = mesh.comm.gather(assemble_scalar(outlet_impulse), root=0)
     p_front = None
     if len(front_cells) > 0:
         p_front = p_.eval(points[0], front_cells[:1])
@@ -286,6 +296,7 @@ for i in range(num_steps):
         t_p[i] = t - dt / 2
         C_D[i] = sum(drag_coeff)
         C_L[i] = sum(lift_coeff)
+        C_S[i] = sum(outlet_impulse_coeff)
         # Choose first pressure that is found from the different processors
         for pressure in p_front:
             if pressure is not None:
@@ -298,7 +309,7 @@ for i in range(num_steps):
 vtx_u.close()
 vtx_p.close()
 
-experiment_number = 4
+experiment_number = 100
 np_path = f'results/arrays/experiments/{experiment_number}/'
 with open(np_path+'sigma11.npy', 'wb') as f:
     np.save(f, np.array(sigma_11_solution_data))
@@ -313,6 +324,8 @@ with open(np_path+'u1.npy', 'wb') as f:
     np.save(f, np.array(u_sol_1))
 with open(np_path+'u2.npy', 'wb') as f:
     np.save(f, np.array(u_sol_2))
+with open(np_path+'u_mag.npy', 'wb') as f:
+    np.save(f, np.array(u_magnitude))
 
 plot_path = f"plots/experiments/{experiment_number}/"
 if mesh.comm.rank == 0:
@@ -342,6 +355,13 @@ if mesh.comm.rank == 0:
     plt.grid()
     plt.legend()
     plt.savefig(plot_path+"pressure_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(t_p, C_S, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
+    plt.title("Outlet Impulse")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path+"impulse_comparison.png")
 
 
 def plotting_gif(u_list, V):
