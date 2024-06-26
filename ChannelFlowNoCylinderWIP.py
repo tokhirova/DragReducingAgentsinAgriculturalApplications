@@ -19,7 +19,7 @@ from dolfinx.geometry import bb_tree, compute_collisions_points, compute_collidi
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
 from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv, sqrt)
+                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv, sqrt, transpose, tr)
 import sys
 import pickle
 
@@ -31,20 +31,34 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
+experiment_number = 109
+np_path = f'results/arrays/experiments/{experiment_number}/'
+
 t = 0
 T = 8.0 # Final time
-dt = 1 / (1600)  # Time step size
+dt = 1 / (200)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-beta = Constant(mesh, PETSc.ScalarType(0.9))  # solvent ratio
+b_n = 0.3
+beta = Constant(mesh, PETSc.ScalarType(b_n))  # solvent ratio
 mu = Constant(mesh, PETSc.ScalarType(0.001))  # Dynamic viscosity
-Re = Constant(mesh, PETSc.ScalarType(100))  # Density
+Re_n = 200
+Re = Constant(mesh, PETSc.ScalarType(Re_n))
 rho = Constant(mesh, PETSc.ScalarType(1))  # Density
 
-b = 30   # length
-Wi = 50#180
-alpha = 0.1
+b = 60   # length
+Wi = 1 #0.50
+alpha = 0.01
+
+# logging
+with open(np_path + "variables.txt", "w") as text_file:
+    text_file.write("Reynolds Number: %s \n" % Re_n)
+    text_file.write("Weissenberg Number: %s \n" % Wi)
+    text_file.write("Max Extension: %s \n" % b)
+    text_file.write("dt: %s \n" % dt)
+    text_file.write("T: %s \n" % T)
+    text_file.write("beta: %s" % b_n)
 
 v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
 s_cg1 = element("Lagrange", mesh.topology.cell_name(), 1)
@@ -103,17 +117,12 @@ S, sigma, phi_tf = fene_p.function_space(mesh)
 x = SpatialCoordinate(mesh)
 bc = fene_p.boundary_conditions(mesh, S, x)
 
-
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
-div_tau = (1-mu)/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
-F1 = Re * rho / k * dot(u - u_n, v) * dx
-F1 += Re * rho * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
-# left = Re / k * dot(u - u_n, v) * dx
-# left += Re*inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-# left += 0.5 * mu * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
-# right = div_tau * dx
-# right += dot(f, v) * dx
+#div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
+div_tau = (beta*(b+2)/b)/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)),v)
+F1 = Re / k * dot(u - u_n, v) * dx
+F1 += Re * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+F1 += (1-beta) * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
 a1 = form(lhs(F1))
@@ -122,13 +131,13 @@ A1 = create_matrix(a1)
 b1 = create_vector(L1)
 
 a2 = form(dot(grad(p), grad(q)) * dx)
-L2 = form(-rho / k * dot(div(u_s), q) * dx)
+L2 = form(-Re / k * dot(div(u_s), q) * dx)
 A2 = assemble_matrix(a2, bcs=bcp)
 A2.assemble()
 b2 = create_vector(L2)
 
-a3 = form(rho * dot(u, v) * dx)
-L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+a3 = form(Re * dot(u, v) * dx)
+L3 = form(Re * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
 A3 = assemble_matrix(a3)
 A3.assemble()
 b3 = create_vector(L3)
@@ -158,10 +167,10 @@ pc3.setType(PETSc.PC.Type.SOR)
 n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
-outlet_impulse = form(sqrt(u_[0]**2+u_[1]**2))
+outlet_impulse = form(u_[0]*dout)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)
-lift = form(-2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)
+drag = form(2 / (Re*mu*1.0) * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs) # 0.1
+lift = form(-2 / (Re*mu*1.0) * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs) # 0.1
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
@@ -185,24 +194,17 @@ if mesh.comm.rank == 0:
 
 from pathlib import Path
 
-folder = Path("results")
-folder.mkdir(exist_ok=True, parents=True)
-vtx_u = VTXWriter(mesh.comm, "results/dfg2D-3-u.bp", [u_], engine="BP4")
-vtx_p = VTXWriter(mesh.comm, "results/dfg2D-3-p.bp", [p_], engine="BP4")
-vtx_u.write(t)
-vtx_p.write(t)
+#folder = Path(f"results/experiments/{experiment_number}/")
+#folder.mkdir(exist_ok=True, parents=True)
+#vtx_u = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-u.bp", [u_], engine="BP4")
+#vtx_p = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-p.bp", [p_], engine="BP4")
+#vtx_u.write(t)
+#vtx_p.write(t)
 progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)
 
 u_sol_1 = []
 u_sol_2 = []
 u_magnitude = []
-
-# vector_field1, vector_field2 = fene_p.vector_field(x)
-# steps = 100
-# T = 1
-# t = t0 = 0
-# num_it = int((T - t0) / steps)
-# dt = T / steps
 
 sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data = fene_p.solution_initialization(
     num_steps, S)
@@ -262,15 +264,14 @@ for i in range(num_steps):
     laenge = int(u_.x.array.shape[0] / 2)
     u_gen_1 = (u_.x.array[2 * k] for k in range(laenge))
     u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
-    u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
     u_sol_1.append(list(u_gen_1))
     u_sol_2.append(list(u_gen_2))
     u_mag_gen = (np.sqrt((u_.x.array[2 * k])**2+(u_.x.array[2 * k + 1])**2) for k in range(laenge))
     u_magnitude.append(list(u_mag_gen))
 
     # Write solutions to file
-    vtx_u.write(t)
-    vtx_p.write(t)
+    #vtx_u.write(t)
+    #vtx_p.write(t)
 
     # Update variable with solution form this time step
     with u_.vector.localForm() as loc_, u_n.vector.localForm() as loc_n, u_n1.vector.localForm() as loc_n1:
@@ -306,11 +307,9 @@ for i in range(num_steps):
             if pressure is not None:
                 p_diff[i] -= pressure[0]
                 break
-vtx_u.close()
-vtx_p.close()
+#vtx_u.close()
+#vtx_p.close()
 
-experiment_number = 100
-np_path = f'results/arrays/experiments/{experiment_number}/'
 with open(np_path+'sigma11.npy', 'wb') as f:
     np.save(f, np.array(sigma_11_solution_data))
 with open(np_path+'sigma12.npy', 'wb') as f:
@@ -362,6 +361,11 @@ if mesh.comm.rank == 0:
     plt.grid()
     plt.legend()
     plt.savefig(plot_path+"impulse_comparison.png")
+
+with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + "new_pressure.bp", [p_], engine="BP4") as vtx:
+    vtx.write(0.0)
+with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + "new_u.bp", [u_], engine="BP4") as vtx:
+    vtx.write(0.0)
 
 
 def plotting_gif(u_list, V):

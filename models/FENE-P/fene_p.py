@@ -1,5 +1,4 @@
 import dolfinx
-import scipy
 import ufl
 from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
                  div, ds, dx, inner, lhs, nabla_grad, rhs, sym)
@@ -11,7 +10,6 @@ import petsc4py
 import dolfinx.fem.petsc
 from dolfinx.nls.petsc import NewtonSolver
 import pyvista
-from IPython import embed
 
 # conda activate fenicsx-env
 
@@ -45,8 +43,8 @@ def vector_field(x,mesh):
     V = dolfinx.fem.functionspace(mesh, v_cg2)
     f = dolfinx.fem.Function(V)
     f.vector.set(0.0)
-    u1 = -x[1]#x[1] - x[1] ** 2
-    u2 = x[0] # x[0]
+    u1 = x[1] - x[1] ** 2
+    u2 = 0
     return [u1,u2]
 
 
@@ -56,6 +54,7 @@ def A(sigma, b):
 
 def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
     # Problem definition
+    #div_tau = 100 * ufl.dot(div((A(sigma, b)) * sigma - Identity(2)), v) / Wi
     t1 = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
     # t2 = ufl.tr(ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2]))*sigma * ufl.transpose(phi)) * dx
     nabla_term = vector_field1 * sigma.dx(0) + vector_field2 * sigma.dx(1)
@@ -89,17 +88,17 @@ def solution_initialization(steps, V):
 
 
 def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha):
-    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi,b, Wi, alpha)
+    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
     try:
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.report = True
         n, converged = solver.solve(sigma)
         #assert (converged)
+        #print(f"Number of iterations: {n:d}")
         return False
     except:
         return True
-    #print(f"Number of iterations: {n:d}")
 
 
 def save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
@@ -128,7 +127,7 @@ def plotting(sigma_sol, V):
 
 def plotting_gif(sigma_list, V):
     plotter = pyvista.Plotter()
-    plotter.open_gif("sigma_11_with_vector_field.gif", fps=30)
+    plotter.open_gif("sigma_11.gif", fps=30)
     topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
     # x = np.concatenate([x[:,0:2],sigma_11.reshape(-1,1)],axis=1)
     grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
@@ -162,8 +161,8 @@ def pipeline():
     u = vector_field(x, domain)
     vector_field1 = u[0]
     vector_field2 = u[1]
-    steps = 100
-    T = 1
+    steps = 50
+    T = 1.0
     t = t0 = 0
     num_it = int((T - t0) / steps)
     dt = T / steps
@@ -173,7 +172,7 @@ def pipeline():
 
     for k in range(steps):
         t += dt
-        solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha)
+        _=solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha)
 
         save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                        sigma_22_solution_data, time_values_data, k, t)
@@ -184,11 +183,7 @@ def pipeline():
 
     plotting_gif(sigma_11_solution_data, V)
 
-# plotting
-# plotting(sigma_11_solution_data[-1])
+
 #pipeline()
 #plotting_gif(sigma_11_solution_data,V)
-# embed()
-# plotting(sigma_12)
-# plotting(sigma_21)
-# plotting(sigma_22_solution_data[1])
+
