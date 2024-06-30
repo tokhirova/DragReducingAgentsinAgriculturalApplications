@@ -39,7 +39,7 @@ def boundary_conditions(domain, V, x):
 
 def vector_field(x,mesh):
     # vector field definition u(x,y)=(y-y²,0)
-    v_cg2 = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
+    v_cg2 = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 1, shape=(mesh.geometry.dim,))
     V = dolfinx.fem.functionspace(mesh, v_cg2)
     f = dolfinx.fem.Function(V)
     f.vector.set(0.0)
@@ -90,12 +90,25 @@ def solution_initialization(steps, V):
 def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha):
     F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
+    newton = True
     try:
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
+        solver.convergence_criterion = "incremental"
         solver.report = True
+        solver.rtol = 1e-2
+        solver.max_it = 1000
+        if not newton:
+            ksp = solver.krylov_solver
+            opts = PETSc.Options()
+            option_prefix = ksp.getOptionsPrefix()
+            opts[f"{option_prefix}ksp_type"] = "cg"
+            opts[f"{option_prefix}pc_type"] = "gamg"
+            opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+            ksp.setFromOptions()
+        #dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
         n, converged = solver.solve(sigma)
-        #assert (converged)
-        #print(f"Number of iterations: {n:d}")
+        # assert (converged)
+        # print(f"Number of iterations: {n:d}")
         return False
     except:
         return True
@@ -187,3 +200,7 @@ def pipeline():
 #pipeline()
 #plotting_gif(sigma_11_solution_data,V)
 
+
+def petsc2array(v):
+    s=v.getValues(range(0, v.getSize()[0]), range(0,  v.getSize()[1]))
+    return s

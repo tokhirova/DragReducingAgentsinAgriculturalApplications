@@ -19,7 +19,8 @@ from dolfinx.geometry import bb_tree, compute_collisions_points, compute_collidi
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
 from dolfinx.mesh import create_mesh, meshtags_from_entities
 from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
-                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv, sqrt, transpose, tr)
+                 as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
+                 sqrt, transpose, tr)
 import sys
 import pickle
 
@@ -31,34 +32,39 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
-experiment_number = 109
+experiment_number = 115
 np_path = f'results/arrays/experiments/{experiment_number}/'
 
 t = 0
-T = 8.0 # Final time
-dt = 1 / (200)  # Time step size
+T = 8.0  # Final time
+dt = 1 / (100)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-b_n = 0.3
-beta = Constant(mesh, PETSc.ScalarType(b_n))  # solvent ratio
-mu = Constant(mesh, PETSc.ScalarType(0.001))  # Dynamic viscosity
-Re_n = 200
+vs = 0.00018
+vp = 0.00002
+vis = vs + vp
+b_n = vs / vis
+beta = Constant(mesh, PETSc.ScalarType(1 - b_n))  # solvent ratio
+mu = Constant(mesh, PETSc.ScalarType(vis))  # Dynamic viscosity
+Re_n = 0.1 / vis
 Re = Constant(mesh, PETSc.ScalarType(Re_n))
 rho = Constant(mesh, PETSc.ScalarType(1))  # Density
 
-b = 60   # length
-Wi = 1 #0.50
+b = 60  # length
+Wi = 0.5
 alpha = 0.01
 
 # logging
 with open(np_path + "variables.txt", "w") as text_file:
+    text_file.write("fluid viscosity: %s \n" % vp)
+    text_file.write("polymer viscosity: %s \n" % vs)
     text_file.write("Reynolds Number: %s \n" % Re_n)
     text_file.write("Weissenberg Number: %s \n" % Wi)
     text_file.write("Max Extension: %s \n" % b)
     text_file.write("dt: %s \n" % dt)
     text_file.write("T: %s \n" % T)
-    text_file.write("beta: %s" % b_n)
+    text_file.write("beta: %s" % (1-b_n))
 
 v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
 s_cg1 = element("Lagrange", mesh.topology.cell_name(), 1)
@@ -77,7 +83,12 @@ class InletVelocity():
 
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        #values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        #values[0] = 2 * 1.5 * (1 - np.cos(self.t * np.pi / 4)) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        if self.t < 2:
+            values[0] = 2 * 1.5 * (1 - np.cos(self.t * np.pi / 2)) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        else:
+            values[0] = 6 * x[1] * (0.41 - x[1]) / (0.41 ** 2)
         return values
 
 
@@ -98,7 +109,6 @@ bcu = [bcu_inflow, bcu_obstacle, bcu_walls]
 bcp_outlet = dirichletbc(PETSc.ScalarType(0), locate_dofs_topological(Q, fdim, ft.find(outlet_marker)), Q)
 bcp = [bcp_outlet]
 
-
 u = TrialFunction(V)
 v = TestFunction(V)
 u_ = Function(V)
@@ -117,12 +127,14 @@ S, sigma, phi_tf = fene_p.function_space(mesh)
 x = SpatialCoordinate(mesh)
 bc = fene_p.boundary_conditions(mesh, S, x)
 
+n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 #div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = (beta*(b+2)/b)/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)),v)
+div_tau = beta/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)),v)
 F1 = Re / k * dot(u - u_n, v) * dx
 F1 += Re * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += (1-beta) * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+F1 += (1 - beta) * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+# F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
 a1 = form(lhs(F1))
@@ -167,17 +179,17 @@ pc3.setType(PETSc.PC.Type.SOR)
 n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
-outlet_impulse = form(u_[0]*dout)
+outlet_impulse = form(u_[0] * dout)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2 / (Re*mu*1.0) * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs) # 0.1
-lift = form(-2 / (Re*mu*1.0) * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs) # 0.1
+drag = form(2 / (Re * mu * 1.0) * (rho * vis * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)  # 0.1
+lift = form(-2 / (Re * mu * 1.0) * (rho * vis * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)  # 0.1
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_S = np.zeros(num_steps, dtype=PETSc.ScalarType)
+    C_T = np.zeros(num_steps, dtype=PETSc.ScalarType)
     t_u = np.zeros(num_steps, dtype=np.float64)
     t_p = np.zeros(num_steps, dtype=np.float64)
-
 
 if mesh.comm.rank == 0:
     t_u = np.zeros(num_steps, dtype=np.float64)
@@ -194,12 +206,12 @@ if mesh.comm.rank == 0:
 
 from pathlib import Path
 
-#folder = Path(f"results/experiments/{experiment_number}/")
-#folder.mkdir(exist_ok=True, parents=True)
-#vtx_u = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-u.bp", [u_], engine="BP4")
-#vtx_p = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-p.bp", [p_], engine="BP4")
-#vtx_u.write(t)
-#vtx_p.write(t)
+# folder = Path(f"results/experiments/{experiment_number}/")
+# folder.mkdir(exist_ok=True, parents=True)
+# vtx_u = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-u.bp", [u_], engine="BP4")
+# vtx_p = VTXWriter(mesh.comm, f"results/experiments/{experiment_number}/dfg2D-3-p.bp", [p_], engine="BP4")
+# vtx_u.write(t)
+# vtx_p.write(t)
 progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)
 
 u_sol_1 = []
@@ -253,7 +265,7 @@ for i in range(num_steps):
 
     crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
     if crash:
-        print("pipeline crashed!!")
+        print(f"pipeline crashed at t={t}!")
         break
     fene_p.save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                           sigma_22_solution_data, time_values_data, i, t)
@@ -266,12 +278,12 @@ for i in range(num_steps):
     u_gen_2 = (u_.x.array[2 * k + 1] for k in range(laenge))
     u_sol_1.append(list(u_gen_1))
     u_sol_2.append(list(u_gen_2))
-    u_mag_gen = (np.sqrt((u_.x.array[2 * k])**2+(u_.x.array[2 * k + 1])**2) for k in range(laenge))
+    u_mag_gen = (np.sqrt((u_.x.array[2 * k]) ** 2 + (u_.x.array[2 * k + 1]) ** 2) for k in range(laenge))
     u_magnitude.append(list(u_mag_gen))
 
     # Write solutions to file
-    #vtx_u.write(t)
-    #vtx_p.write(t)
+    # vtx_u.write(t)
+    # vtx_p.write(t)
 
     # Update variable with solution form this time step
     with u_.vector.localForm() as loc_, u_n.vector.localForm() as loc_n, u_n1.vector.localForm() as loc_n1:
@@ -283,6 +295,7 @@ for i in range(num_steps):
     # to processor zero and sum the contributions.
     drag_coeff = mesh.comm.gather(assemble_scalar(drag), root=0)
     lift_coeff = mesh.comm.gather(assemble_scalar(lift), root=0)
+    tau_coeff = mesh.comm.gather(assemble_scalar(form(div_tau * dx)), root=0)
     outlet_impulse_coeff = mesh.comm.gather(assemble_scalar(outlet_impulse), root=0)
     p_front = None
     if len(front_cells) > 0:
@@ -297,6 +310,7 @@ for i in range(num_steps):
         t_p[i] = t - dt / 2
         C_D[i] = sum(drag_coeff)
         C_L[i] = sum(lift_coeff)
+        C_T[i] = sum(tau_coeff)
         C_S[i] = sum(outlet_impulse_coeff)
         # Choose first pressure that is found from the different processors
         for pressure in p_front:
@@ -307,23 +321,23 @@ for i in range(num_steps):
             if pressure is not None:
                 p_diff[i] -= pressure[0]
                 break
-#vtx_u.close()
-#vtx_p.close()
+# vtx_u.close()
+# vtx_p.close()
 
-with open(np_path+'sigma11.npy', 'wb') as f:
+with open(np_path + 'sigma11.npy', 'wb') as f:
     np.save(f, np.array(sigma_11_solution_data))
-with open(np_path+'sigma12.npy', 'wb') as f:
+with open(np_path + 'sigma12.npy', 'wb') as f:
     np.save(f, np.array(sigma_12_solution_data))
-with open(np_path+'sigma21.npy', 'wb') as f:
+with open(np_path + 'sigma21.npy', 'wb') as f:
     np.save(f, np.array(sigma_21_solution_data))
-with open(np_path+'sigma22.npy', 'wb') as f:
+with open(np_path + 'sigma22.npy', 'wb') as f:
     np.save(f, np.array(sigma_22_solution_data))
 
-with open(np_path+'u1.npy', 'wb') as f:
+with open(np_path + 'u1.npy', 'wb') as f:
     np.save(f, np.array(u_sol_1))
-with open(np_path+'u2.npy', 'wb') as f:
+with open(np_path + 'u2.npy', 'wb') as f:
     np.save(f, np.array(u_sol_2))
-with open(np_path+'u_mag.npy', 'wb') as f:
+with open(np_path + 'u_mag.npy', 'wb') as f:
     np.save(f, np.array(u_magnitude))
 
 plot_path = f"plots/experiments/{experiment_number}/"
@@ -338,7 +352,7 @@ if mesh.comm.rank == 0:
     plt.title("Drag coefficient")
     plt.grid()
     plt.legend()
-    plt.savefig(plot_path+"drag_comparison.png")
+    plt.savefig(plot_path + "drag_comparison.png")
 
     fig = plt.figure(figsize=(25, 8))
     l1 = plt.plot(t_u, C_L, label=r"FEniCSx  ({0:d} dofs)".format(
@@ -346,43 +360,31 @@ if mesh.comm.rank == 0:
     plt.title("Lift coefficient")
     plt.grid()
     plt.legend()
-    plt.savefig(plot_path+"lift_comparison.png")
+    plt.savefig(plot_path + "lift_comparison.png")
 
     fig = plt.figure(figsize=(25, 8))
     l1 = plt.plot(t_p, p_diff, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
     plt.title("Pressure difference")
     plt.grid()
     plt.legend()
-    plt.savefig(plot_path+"pressure_comparison.png")
+    plt.savefig(plot_path + "pressure_comparison.png")
 
     fig = plt.figure(figsize=(25, 8))
     l1 = plt.plot(t_p, C_S, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
     plt.title("Outlet Impulse")
     plt.grid()
     plt.legend()
-    plt.savefig(plot_path+"impulse_comparison.png")
+    plt.savefig(plot_path + "impulse_comparison.png")
 
-with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + "new_pressure.bp", [p_], engine="BP4") as vtx:
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(t_p, C_T, label=r"FEniCSx ({0:d} dofs)".format(num_velocity_dofs + num_pressure_dofs), linewidth=2)
+    plt.title("Summed tau")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path + "tau.png")
+
+with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + f"{experiment_number}_{str(b_n)}_pressure.bp", [p_], engine="BP4") as vtx:
     vtx.write(0.0)
-with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + "new_u.bp", [u_], engine="BP4") as vtx:
+with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + f"{experiment_number}_{str(b_n)}_u.bp", [u_], engine="BP4") as vtx:
     vtx.write(0.0)
 
-
-def plotting_gif(u_list, V):
-    plotter = pyvista.Plotter()
-    plotter.open_gif("u1.gif", fps=30)
-    topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
-    grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
-    grid.point_data["u"] = u_list[0]
-    warped = grid.warp_by_scalar("u", factor=0.5)
-    plotter.add_mesh(warped, show_edges=True, clim=[np.min(u_list), np.max(u_list)])
-    for u_sol in u_list:
-        new_warped = grid.warp_by_scalar("u", factor=0.1)
-        warped.points[:, :] = new_warped.points
-        warped.point_data["u"][:] = u_sol
-        plotter.write_frame()
-    plotter.close()
-
-
-#plotting_gif(u_sol_1, V)
-# fene_p.plotting_gif(sigma_11_solution_data, S)

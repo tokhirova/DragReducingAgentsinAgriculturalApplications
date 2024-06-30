@@ -77,8 +77,8 @@ def streamlines_animation(data, fluid_mesh):
     p.show(cpos=camera_position)
 
 
-plot = 9
-i = 107
+plot = 1
+i = 113
 if plot == 1:
     with open(f"results/arrays/experiments/{i}/u1.npy", "rb") as f:
         plotting_gif(np.load(f), V, f"plots/experiments/{i}/u1_new.mp4", "u1")
