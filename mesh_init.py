@@ -77,10 +77,12 @@ def create_mesh(gdim):
         gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)
+        #gmsh.option.setNumber("Mesh.MeshSizeMax", 0.025)
         gmsh.model.mesh.generate(gdim)
         gmsh.model.mesh.setOrder(2)
         gmsh.model.mesh.optimize("Netgen")
 
     mesh, _, ft = gmshio.model_to_mesh(gmsh.model, mesh_comm, model_rank, gdim=gdim)
     ft.name = "Facet markers"
+    gmsh.write("mesh.msh")
     return mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker

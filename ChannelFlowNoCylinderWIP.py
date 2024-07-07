@@ -22,7 +22,7 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
                  sqrt, transpose, tr)
 import sys
-import pickle
+import os
 
 sys.path.append('models/FENE-P/')
 import fene_p
@@ -32,8 +32,13 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
-experiment_number = 115
+# plot_mesh(dolfinx.plot.vtk_mesh(mesh))
+# dolfinx.plot(mesh)
+experiment_number = 217
 np_path = f'results/arrays/experiments/{experiment_number}/'
+plot_path = f"plots/experiments/{experiment_number}/"
+os.mkdir(np_path)
+os.mkdir(plot_path)
 
 t = 0
 T = 8.0  # Final time
@@ -41,8 +46,8 @@ dt = 1 / (100)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-vs = 0.00018
-vp = 0.00002
+vs = 0.0001
+vp = 0.0000
 vis = vs + vp
 b_n = vs / vis
 beta = Constant(mesh, PETSc.ScalarType(1 - b_n))  # solvent ratio
@@ -52,7 +57,7 @@ Re = Constant(mesh, PETSc.ScalarType(Re_n))
 rho = Constant(mesh, PETSc.ScalarType(1))  # Density
 
 b = 60  # length
-Wi = 0.5
+Wi = 0.2
 alpha = 0.01
 
 # logging
@@ -64,7 +69,7 @@ with open(np_path + "variables.txt", "w") as text_file:
     text_file.write("Max Extension: %s \n" % b)
     text_file.write("dt: %s \n" % dt)
     text_file.write("T: %s \n" % T)
-    text_file.write("beta: %s" % (1-b_n))
+    text_file.write("beta: %s" % (1 - b_n))
 
 v_cg2 = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
 s_cg1 = element("Lagrange", mesh.topology.cell_name(), 1)
@@ -83,8 +88,8 @@ class InletVelocity():
 
     def __call__(self, x):
         values = np.zeros((gdim, x.shape[1]), dtype=PETSc.ScalarType)
-        #values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
-        #values[0] = 2 * 1.5 * (1 - np.cos(self.t * np.pi / 4)) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        # values[0] = 4 * 1.5 * np.sin(self.t * np.pi / 8) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
+        # values[0] = 2 * 1.5 * (1 - np.cos(self.t * np.pi / 4)) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
         if self.t < 2:
             values[0] = 2 * 1.5 * (1 - np.cos(self.t * np.pi / 2)) * x[1] * (0.41 - x[1]) / (0.41 ** 2)
         else:
@@ -129,8 +134,8 @@ bc = fene_p.boundary_conditions(mesh, S, x)
 
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
-#div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = beta/Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)),v)
+# div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
+div_tau = beta / Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
 F1 = Re / k * dot(u - u_n, v) * dx
 F1 += Re * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += (1 - beta) * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
@@ -222,6 +227,11 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
     num_steps, S)
 
 for i in range(num_steps):
+    # if t < 3.5:
+    #     dt = 1 / 100
+    # else:
+    #     dt = 1 / 400
+    #print(dt)
     progress.update(1)
     # Update current time step
     t += dt
@@ -340,7 +350,19 @@ with open(np_path + 'u2.npy', 'wb') as f:
 with open(np_path + 'u_mag.npy', 'wb') as f:
     np.save(f, np.array(u_magnitude))
 
-plot_path = f"plots/experiments/{experiment_number}/"
+with open(np_path + 'drag_coeff.npy', 'wb') as f:
+    np.save(f, np.array(C_D))
+with open(np_path + 'lift_coeff.npy', 'wb') as f:
+    np.save(f, np.array(C_L))
+with open(np_path + 'pressure_coeff.npy', 'wb') as f:
+    np.save(f, np.array(p_diff))
+with open(np_path + 'tau_array.npy', 'wb') as f:
+    np.save(f, np.array(C_T))
+with open(np_path + 'u_time.npy', 'wb') as f:
+    np.save(f, np.array(t_u))
+with open(np_path + 'p_time.npy', 'wb') as f:
+    np.save(f, np.array(t_p))
+
 if mesh.comm.rank == 0:
     if not os.path.exists("results/figures"):
         os.mkdir("results/figures")
@@ -383,8 +405,8 @@ if mesh.comm.rank == 0:
     plt.legend()
     plt.savefig(plot_path + "tau.png")
 
-with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + f"{experiment_number}_{str(b_n)}_pressure.bp", [p_], engine="BP4") as vtx:
+with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + f"{experiment_number}_{str(b_n)}_pressure.bp", [p_],
+                          engine="BP4") as vtx:
     vtx.write(0.0)
 with dolfinx.io.VTXWriter(MPI.COMM_WORLD, np_path + f"{experiment_number}_{str(b_n)}_u.bp", [u_], engine="BP4") as vtx:
     vtx.write(0.0)
-
