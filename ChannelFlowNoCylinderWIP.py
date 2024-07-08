@@ -34,7 +34,7 @@ mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.
 
 # plot_mesh(dolfinx.plot.vtk_mesh(mesh))
 # dolfinx.plot(mesh)
-experiment_number = 217
+experiment_number = 229
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
@@ -46,24 +46,28 @@ dt = 1 / (100)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-vs = 0.0001
-vp = 0.0000
+vs = 0.001
+vp = 0.000
 vis = vs + vp
 b_n = vs / vis
+U_n = 1
+L_n = 1 # TODO: usually needs to be 0.1
 beta = Constant(mesh, PETSc.ScalarType(1 - b_n))  # solvent ratio
 mu = Constant(mesh, PETSc.ScalarType(vis))  # Dynamic viscosity
-Re_n = 0.1 / vis
+Re_n = (U_n * L_n) / vis
 Re = Constant(mesh, PETSc.ScalarType(Re_n))
 rho = Constant(mesh, PETSc.ScalarType(1))  # Density
+U = Constant(mesh, PETSc.ScalarType(U_n))  # mean velocity
+L = Constant(mesh, PETSc.ScalarType(L_n))  # characteristic length
 
 b = 60  # length
-Wi = 0.2
+Wi = 0.5
 alpha = 0.01
 
 # logging
 with open(np_path + "variables.txt", "w") as text_file:
-    text_file.write("fluid viscosity: %s \n" % vp)
-    text_file.write("polymer viscosity: %s \n" % vs)
+    text_file.write("fluid viscosity: %s \n" % vs)
+    text_file.write("polymer viscosity: %s \n" % vp)
     text_file.write("Reynolds Number: %s \n" % Re_n)
     text_file.write("Weissenberg Number: %s \n" % Wi)
     text_file.write("Max Extension: %s \n" % b)
@@ -135,10 +139,10 @@ bc = fene_p.boundary_conditions(mesh, S, x)
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = beta / Wi * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
-F1 = Re / k * dot(u - u_n, v) * dx
-F1 += Re * inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += (1 - beta) * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+div_tau = beta / (Wi*Re) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+F1 = 1 / k * dot(u - u_n, v) * dx
+F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
+F1 += (1 - beta)/Re * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
@@ -148,13 +152,13 @@ A1 = create_matrix(a1)
 b1 = create_vector(L1)
 
 a2 = form(dot(grad(p), grad(q)) * dx)
-L2 = form(-Re / k * dot(div(u_s), q) * dx)
+L2 = form(-1 / k * dot(div(u_s), q) * dx)
 A2 = assemble_matrix(a2, bcs=bcp)
 A2.assemble()
 b2 = create_vector(L2)
 
-a3 = form(Re * dot(u, v) * dx)
-L3 = form(Re * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+a3 = form(dot(u, v) * dx)
+L3 = form(dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
 A3 = assemble_matrix(a3)
 A3.assemble()
 b3 = create_vector(L3)
