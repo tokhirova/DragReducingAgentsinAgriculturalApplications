@@ -10,6 +10,9 @@ import petsc4py
 import dolfinx.fem.petsc
 from dolfinx.nls.petsc import NewtonSolver
 import pyvista
+import os
+import matplotlib.pyplot as plt
+
 
 # conda activate fenicsx-env
 
@@ -37,7 +40,7 @@ def boundary_conditions(domain, V, x):
     return bc
 
 
-def vector_field(x,mesh):
+def vector_field(x, mesh):
     # vector field definition u(x,y)=(y-y²,0)
     v_cg2 = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 1, shape=(mesh.geometry.dim,))
     V = dolfinx.fem.functionspace(mesh, v_cg2)
@@ -45,7 +48,7 @@ def vector_field(x,mesh):
     f.vector.set(0.0)
     u1 = x[1] - x[1] ** 2
     u2 = 0
-    return [u1,u2]
+    return [u1, u2]
 
 
 def A(sigma, b):
@@ -54,7 +57,7 @@ def A(sigma, b):
 
 def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
     # Problem definition
-    #div_tau = 100 * ufl.dot(div((A(sigma, b)) * sigma - Identity(2)), v) / Wi
+    # div_tau = 100 * ufl.dot(div((A(sigma, b)) * sigma - Identity(2)), v) / Wi
     t1 = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
     # t2 = ufl.tr(ufl.nabla_div(ufl.as_vector([vector_field1, vector_field2]))*sigma * ufl.transpose(phi)) * dx
     nabla_term = vector_field1 * sigma.dx(0) + vector_field2 * sigma.dx(1)
@@ -87,9 +90,9 @@ def solution_initialization(steps, V):
     return sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data
 
 
-def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha):
+def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha):
     F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha)
-    problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
+    problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)  # , bcs=[bc])
     newton = True
     try:
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
@@ -105,7 +108,7 @@ def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha
             opts[f"{option_prefix}pc_type"] = "gamg"
             opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
             ksp.setFromOptions()
-        #dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
+        # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
         n, converged = solver.solve(sigma)
         # assert (converged)
         # print(f"Number of iterations: {n:d}")
@@ -158,34 +161,63 @@ def plotting_gif(sigma_list, V):
 
 
 def pipeline():
+    experiment_number = 93
+    np_path = f'results/fp/experiments/arrays/{experiment_number}/'
+    plot_path = f"results/fp/experiments/plots/{experiment_number}/"
+    os.mkdir(np_path)
+    os.mkdir(plot_path)
+
     Lx = 1.0
     Ly = 1.0
     Nx = 50
     Ny = 50
-    b, Wi, alpha = 30, 50, 0.1
+    b, Wi, alpha = 30, 0.50, 0.1
     # mesh
     comm_t = MPI.COMM_WORLD
     domain = dolfinx.mesh.create_rectangle(comm_t, [np.array([0., 0.]), np.array([Lx, Ly])],
                                            [Nx, Ny], dolfinx.mesh.CellType.triangle)
-
     V, sigma, phi = function_space(domain)
+    # plotter = pyvista.Plotter()
+    # topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
+    # grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
+    # plotter.add_mesh(grid, show_edges=True, show_scalar_bar=True)
+    # plotter.view_xy()
+    # figure = plotter.screenshot("sigma_domain.png")
     x = ufl.SpatialCoordinate(domain)
     bc = boundary_conditions(domain, V, x)
     u = vector_field(x, domain)
     vector_field1 = u[0]
     vector_field2 = u[1]
-    steps = 50
+    steps = 10
     T = 1.0
     t = t0 = 0
     num_it = int((T - t0) / steps)
-    dt = T / steps
+    dt = T/steps
+
+    with open(np_path + "variables.txt", "w") as text_file:
+        text_file.write("vector field1: %s \n" % str(u[0]))
+        text_file.write("vector field2: %s \n" % str(u[1]))
+        text_file.write("domain length Lx: %s \n" % str(Lx))
+        text_file.write("domain length Ly: %s \n" % str(Ly))
+        text_file.write("domain size Nx: %s \n" % str(Nx))
+        text_file.write("domain size Ny: %s \n" % str(Ny))
+        text_file.write("Weissenberg Number: %s \n" % Wi)
+        text_file.write("Max Extension: %s \n" % b)
+        text_file.write("dt: %s \n" % steps)
+        text_file.write("t0: %s \n" % t0)
+        text_file.write("T: %s \n" % T)
+        text_file.write("alpha: %s" % alpha)
+
+    _, tau_11_solution_data, tau_12_solution_data, tau_21_solution_data, tau_22_solution_data, time_values_data = solution_initialization(
+        steps, V)
 
     sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data = solution_initialization(
         steps, V)
 
     for k in range(steps):
+        print(t)
         t += dt
-        _=solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi,b, Wi, alpha)
+        _ = solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha)
 
         save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                        sigma_22_solution_data, time_values_data, k, t)
@@ -194,13 +226,74 @@ def pipeline():
         sigma_n.x.array[:] = sigma.x.array
         t_n = t
 
-    plotting_gif(sigma_11_solution_data, V)
+    s1 = np.shape(time_values_data)[0]
+    s2 = np.shape(sigma_11_solution_data)[1]
+    tau = np.zeros((s1, 2, 2))
+    for i in range(s1):
+        B_prime = np.zeros((2, 2))
+        for j in range(s2):
+            A = np.array([[sigma_11_solution_data[i][j], sigma_12_solution_data[i][j]],
+                          [sigma_21_solution_data[i][j], sigma_22_solution_data[i][j]]])
+
+            trace_A = np.trace(A)
+            factor = (1 - trace_A / b) ** (-1)
+            B = factor * A - np.identity(2)
+
+            B_prime += B
+
+            # Store the result in P
+        tau[i] = B_prime
+
+    with open(np_path + 'sigma11.npy', 'wb') as f:
+        np.save(f, np.array(sigma_11_solution_data))
+    with open(np_path + 'sigma12.npy', 'wb') as f:
+        np.save(f, np.array(sigma_12_solution_data))
+    with open(np_path + 'sigma21.npy', 'wb') as f:
+        np.save(f, np.array(sigma_21_solution_data))
+    with open(np_path + 'sigma22.npy', 'wb') as f:
+        np.save(f, np.array(sigma_22_solution_data))
+
+    with open(np_path + 'tau.npy', 'wb') as f:
+        np.save(f, tau)
+
+    num_velocity_dofs = V.dofmap.index_map_bs * V.dofmap.index_map.size_global
+    print(V.dofmap.index_map.size_global)
+    print(V.dofmap.index_map_bs)
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(time_values_data, tau[:, 0, 0], label=r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs), linewidth=2)
+    plt.title("tau_11 coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path + "tau_11_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(time_values_data, tau[:, 0, 1], label=r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs), linewidth=2)
+    plt.title("tau_12 coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path + "tau_12_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(time_values_data, tau[:, 1, 0], label=r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs), linewidth=2)
+    plt.title("tau_21 coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path + "tau_21_comparison.png")
+
+    fig = plt.figure(figsize=(25, 8))
+    l1 = plt.plot(time_values_data, tau[:, 1, 1], label=r"FEniCSx  ({0:d} dofs)".format(num_velocity_dofs), linewidth=2)
+    plt.title("tau_22 coefficient")
+    plt.grid()
+    plt.legend()
+    plt.savefig(plot_path + "tau_22_comparison.png")
 
 
 #pipeline()
-#plotting_gif(sigma_11_solution_data,V)
+
+
+# plotting_gif(sigma_11_solution_data,V)
 
 
 def petsc2array(v):
-    s=v.getValues(range(0, v.getSize()[0]), range(0,  v.getSize()[1]))
+    s = v.getValues(range(0, v.getSize()[0]), range(0, v.getSize()[1]))
     return s

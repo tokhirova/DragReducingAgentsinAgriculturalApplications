@@ -77,7 +77,7 @@ def create_mesh(gdim):
         gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)
-        #gmsh.option.setNumber("Mesh.MeshSizeMax", 0.025)
+        gmsh.option.setNumber("Mesh.MeshSizeMax", 0.05)  # define max mesh size
         gmsh.model.mesh.generate(gdim)
         gmsh.model.mesh.setOrder(2)
         gmsh.model.mesh.optimize("Netgen")
