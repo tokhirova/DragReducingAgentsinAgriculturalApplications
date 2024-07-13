@@ -12,7 +12,7 @@ from dolfinx.nls.petsc import NewtonSolver
 import pyvista
 import os
 import matplotlib.pyplot as plt
-
+from slepc4py import SLEPc
 
 # conda activate fenicsx-env
 
@@ -90,7 +90,7 @@ def solution_initialization(steps, V):
     return sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data
 
 
-def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha):
+def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha, cond):
     F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha)
     problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)  # , bcs=[bc])
     newton = True
@@ -108,9 +108,15 @@ def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alph
             opts[f"{option_prefix}pc_type"] = "gamg"
             opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
             ksp.setFromOptions()
-        # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
+        dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
         n, converged = solver.solve(sigma)
-        # assert (converged)
+        # t = SLEPc.EPS.Which.LARGEST_MAGNITUDE
+        # eig_max = test(solver.A,t)
+        # f = SLEPc.EPS.Which.SMALLEST_MAGNITUDE
+        # eig_min = test(solver.A,f)
+        # cond.append(eig_max[-1]/eig_min[-1])
+        #print(cond)
+        assert (converged)
         # print(f"Number of iterations: {n:d}")
         return False
     except:
@@ -213,11 +219,11 @@ def pipeline():
 
     sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data = solution_initialization(
         steps, V)
-
+    cond = []
     for k in range(steps):
         print(t)
         t += dt
-        _ = solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha)
+        _ = solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha, cond)
 
         save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
                        sigma_22_solution_data, time_values_data, k, t)
@@ -297,3 +303,27 @@ def pipeline():
 def petsc2array(v):
     s = v.getValues(range(0, v.getSize()[0]), range(0, v.getSize()[1]))
     return s
+
+def test(A,t):
+    eigensolver = SLEPc.EPS().create(MPI.COMM_WORLD)
+    eigensolver.setOperators(A)
+    eigensolver.setWhichEigenpairs(t)
+    # Print = PETSc.Sys.Print
+    nev, ncv, mpd = eigensolver.getDimensions()
+    # Print("Number of requested eigenvalues: %d" % nev)
+    eigensolver.solve()
+    vr, wr = A.getVecs()
+    vi, wi = A.getVecs()
+    nconv = eigensolver.getConverged()
+    #
+    k = []
+    for i in range(nconv):
+        k.append(eigensolver.getEigenpair(i, vr, vi))
+        error = eigensolver.computeError(i)
+        # if k[-1].imag != 0.0:
+        #     Print(" %9f%+9f j %12g" % (k[-1].real, k[-1].imag, error))
+        # else:
+        #     Print(" %12f      %12g" % (k[-1].real, error))
+    # Print()
+
+    return k

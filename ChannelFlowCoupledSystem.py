@@ -30,11 +30,11 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
-experiment_number = 1000
+experiment_number = 4000
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
-os.mkdir(np_path)
-os.mkdir(plot_path)
+#os.mkdir(np_path)
+#os.mkdir(plot_path)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # discretization parameters
@@ -48,22 +48,24 @@ k = Constant(mesh, PETSc.ScalarType(dt))
 U_n = 1  # mean inlet velocity
 L_n = 0.1  # characteristic length
 rho_n = 1.0  # density
+vs_n = 0.0009  # fluid visc.
 
 # flow properties for fokker planck
-vp = 0.00001  # polymer visc.
+vp_n = 0.0001  # polymer visc.
 b = 60  # dumbbell length
-Wi = 0.3  # Weissenberg number
+Wi = 300  # Weissenberg number
 alpha = 0.01  # extra diffusion scale
 
 # mixture properties
-vs = 0.00009  # fluid visc.
-vis = vs + vp  # total visc.
-b_n = vs / vis  # solvent ratio
+vis = vs_n + vp_n  # total visc.
+b_n = vs_n / vis  # solvent ratio
 Re_n = (U_n * L_n) / vis  # reynolds number
 
 # doflinx parameter initialization
 beta = Constant(mesh, PETSc.ScalarType(b_n))
 mu = Constant(mesh, PETSc.ScalarType(vis))
+vp = Constant(mesh, PETSc.ScalarType(vp_n))
+vs = Constant(mesh, PETSc.ScalarType(vs_n))
 Re = Constant(mesh, PETSc.ScalarType(Re_n))
 rho = Constant(mesh, PETSc.ScalarType(rho_n))
 U = Constant(mesh, PETSc.ScalarType(U_n))
@@ -71,9 +73,9 @@ L = Constant(mesh, PETSc.ScalarType(L_n))
 # ---------------------------------------------------------------------------------------------------------------------
 # parameter output
 with open(np_path + "variables.txt", "w") as text_file:
-    text_file.write("fluid viscosity: %s \n" % vs)
-    text_file.write("polymer viscosity: %s \n" % vp)
-    text_file.write("Reynolds Number: %s \n" % (Re_n / 10))
+    text_file.write("fluid viscosity: %s \n" % vs_n)
+    text_file.write("polymer viscosity: %s \n" % vp_n)
+    text_file.write("Reynolds Number: %s \n" % Re_n)
     text_file.write("Weissenberg Number: %s \n" % Wi)
     text_file.write("Max Extension: %s \n" % b)
     text_file.write("dt: %s \n" % dt)
@@ -150,10 +152,10 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = (1 - beta) / (Wi * Re) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
-F1 = 1 / k * dot(u - u_n, v) * dx
+div_tau = vp * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += (beta) / Re * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+F1 += vs * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
@@ -165,13 +167,13 @@ A1 = create_matrix(a1)
 b1 = create_vector(L1)
 
 a2 = form(dot(grad(p), grad(q)) * dx)
-L2 = form(-1 / k * dot(div(u_s), q) * dx)
+L2 = form(-rho / k * dot(div(u_s), q) * dx)
 A2 = assemble_matrix(a2, bcs=bcp)
 A2.assemble()
 b2 = create_vector(L2)
 
-a3 = form(dot(u, v) * dx)
-L3 = form(dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
+a3 = form(rho * dot(u, v) * dx)
+L3 = form(rho * dot(u_s, v) * dx - k * dot(nabla_grad(phi), v) * dx)
 A3 = assemble_matrix(a3)
 A3.assemble()
 b3 = create_vector(L3)
@@ -204,8 +206,8 @@ n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2 / (Re * mu * 1.0) * (rho * vis * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)  # 0.1
-lift = form(-2 / (Re * mu * 1.0) * (rho * vis * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)  # 0.1
+drag = form(2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)  # 0.1
+lift = form(-2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)  # 0.1
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
@@ -227,6 +229,7 @@ if mesh.comm.rank == 0:
     p_diff = np.zeros(num_steps, dtype=PETSc.ScalarType)
 
 u_magnitude = []  # flow speed list
+cond = []
 # ---------------------------------------------------------------------------------------------------------------------
 progress = tqdm.autonotebook.tqdm(desc="Solving PDE", total=num_steps)  # progress bar
 # ---------------------------------------------------------------------------------------------------------------------
@@ -275,7 +278,7 @@ for i in range(num_steps):
     u_.x.scatter_forward()
     # ---------------------------------------------------------------------------------------------------------------------
     # Step 2: FENE-P solving
-    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha)
+    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha,cond)
     if crash:
         print(f"FENE-P pipeline crashed at t={t}!")
         break
@@ -335,6 +338,8 @@ with open(np_path + 'p_time.npy', 'wb') as f:
 
 with open(np_path + 'u_mag.npy', 'wb') as f:
     np.save(f, np.array(u_magnitude))
+with open(np_path + 'F_cond.npy', 'wb') as f:
+    np.save(f, np.array(cond))
 
 # fokker plank solution
 with open(np_path + 'sigma11.npy', 'wb') as f:
