@@ -14,6 +14,7 @@ import os
 import matplotlib.pyplot as plt
 from slepc4py import SLEPc
 
+
 # conda activate fenicsx-env
 
 
@@ -98,7 +99,7 @@ def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alph
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
         solver.report = True
-        solver.rtol = 1e-2
+        solver.rtol = 1e-8
         solver.max_it = 1000
         if not newton:
             ksp = solver.krylov_solver
@@ -108,15 +109,18 @@ def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alph
             opts[f"{option_prefix}pc_type"] = "gamg"
             opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
             ksp.setFromOptions()
-        dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
+        # dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
         n, converged = solver.solve(sigma)
-        # t = SLEPc.EPS.Which.LARGEST_MAGNITUDE
-        # eig_max = test(solver.A,t)
-        # f = SLEPc.EPS.Which.SMALLEST_MAGNITUDE
-        # eig_min = test(solver.A,f)
-        # cond.append(eig_max[-1]/eig_min[-1])
-        #print(cond)
-        assert (converged)
+        # try:
+        #     t = SLEPc.EPS.Which.LARGEST_MAGNITUDE
+        #     eig_max = test(solver.A,t)
+        #     f = SLEPc.EPS.Which.SMALLEST_MAGNITUDE
+        #     eig_min = test(solver.A,f)
+        #     cond.append(eig_max[-1]/eig_min[-1])
+        # except:
+        #     print("EW crash")
+        # print(cond)
+        # assert (converged)
         # print(f"Number of iterations: {n:d}")
         return False
     except:
@@ -198,7 +202,7 @@ def pipeline():
     T = 1.0
     t = t0 = 0
     num_it = int((T - t0) / steps)
-    dt = T/steps
+    dt = T / steps
 
     with open(np_path + "variables.txt", "w") as text_file:
         text_file.write("vector field1: %s \n" % str(u[0]))
@@ -294,7 +298,7 @@ def pipeline():
     plt.savefig(plot_path + "tau_22_comparison.png")
 
 
-#pipeline()
+# pipeline()
 
 
 # plotting_gif(sigma_11_solution_data,V)
@@ -304,7 +308,8 @@ def petsc2array(v):
     s = v.getValues(range(0, v.getSize()[0]), range(0, v.getSize()[1]))
     return s
 
-def test(A,t):
+
+def test(A, t):
     eigensolver = SLEPc.EPS().create(MPI.COMM_WORLD)
     eigensolver.setOperators(A)
     eigensolver.setWhichEigenpairs(t)

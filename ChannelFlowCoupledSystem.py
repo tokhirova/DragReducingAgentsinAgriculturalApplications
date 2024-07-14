@@ -30,11 +30,11 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
-experiment_number = 4000
+experiment_number = 2006
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
-#os.mkdir(np_path)
-#os.mkdir(plot_path)
+os.mkdir(np_path)
+os.mkdir(plot_path)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # discretization parameters
@@ -48,12 +48,12 @@ k = Constant(mesh, PETSc.ScalarType(dt))
 U_n = 1  # mean inlet velocity
 L_n = 0.1  # characteristic length
 rho_n = 1.0  # density
-vs_n = 0.0009  # fluid visc.
+vs_n = 0.00099  # fluid visc.
 
 # flow properties for fokker planck
-vp_n = 0.0001  # polymer visc.
+vp_n = 0.00001  # polymer visc.
 b = 60  # dumbbell length
-Wi = 300  # Weissenberg number
+Wi = 0.3  # Weissenberg number
 alpha = 0.01  # extra diffusion scale
 
 # mixture properties
