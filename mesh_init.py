@@ -10,15 +10,17 @@ c_x = c_y = 0.2
 r = 0.05
 
 
-def create_mesh(gdim):
+def create_mesh(gdim, obst):
     mesh_comm = MPI.COMM_WORLD
     model_rank = 0
     if mesh_comm.rank == model_rank:
         rectangle = gmsh.model.occ.addRectangle(0, 0, 0, L, H, tag=1)
-        obstacle = gmsh.model.occ.addDisk(c_x, c_y, 0, r, r)
+        if obst:
+            obstacle = gmsh.model.occ.addDisk(c_x, c_y, 0, r, r)
 
     if mesh_comm.rank == model_rank:
-        fluid = gmsh.model.occ.cut([(gdim, rectangle)], [(gdim, obstacle)])
+        if obst:
+            fluid = gmsh.model.occ.cut([(gdim, rectangle)], [(gdim, obstacle)])
         gmsh.model.occ.synchronize()
 
     fluid_marker = 1

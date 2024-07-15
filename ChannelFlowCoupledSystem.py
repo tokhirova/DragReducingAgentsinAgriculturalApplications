@@ -28,9 +28,10 @@ import mesh_init
 
 gmsh.initialize()
 gdim = 2
-mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
+mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
 
-experiment_number = 10010
+# ---------------------------------------------------------------------------------------------------------------------
+experiment_number = 10035
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
@@ -48,12 +49,13 @@ k = Constant(mesh, PETSc.ScalarType(dt))
 U_n = 1  # mean inlet velocity
 L_n = 0.1  # characteristic length
 rho_n = 1.0  # density
-vs_n = 0.0007  # fluid visc.
+vs_n = 0.000995  # fluid visc.
 
 # flow properties for fokker planck
-vp_n = 0.0003  # polymer visc.
-b = 60  # dumbbell length
-Wi = 0.03  # Weissenberg number
+vp_n = 0.000005  # polymer visc.
+b = 100  # dumbbell length
+lambd = 0.03
+Wi = lambd*U_n/L_n # 0.03  # Weissenberg number
 alpha = 0.01  # extra diffusion scale
 
 # mixture properties
@@ -80,7 +82,7 @@ with open(np_path + "variables.txt", "w") as text_file:
     text_file.write("Max Extension: %s \n" % b)
     text_file.write("dt: %s \n" % dt)
     text_file.write("T: %s \n" % T)
-    text_file.write("beta: %s" % (1 - b_n))
+    text_file.write("beta: %s" % b_n)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # navier stokes function spaces
@@ -152,7 +154,7 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = vp/(10*Wi) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+div_tau = vp/(lambd) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
 F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += vs * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
@@ -278,7 +280,7 @@ for i in range(num_steps):
     u_.x.scatter_forward()
     # ---------------------------------------------------------------------------------------------------------------------
     # Step 2: FENE-P solving
-    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha,cond)
+    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, lambd, alpha,cond)
     if crash:
         print(f"FENE-P pipeline crashed at t={t}!")
         break

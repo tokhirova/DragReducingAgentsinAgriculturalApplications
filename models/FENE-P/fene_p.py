@@ -56,7 +56,7 @@ def A(sigma, b):
     return 1 / (1 - ufl.tr(sigma) / b)
 
 
-def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
+def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, lambd, alpha):
     # Problem definition
     # div_tau = 100 * ufl.dot(div((A(sigma, b)) * sigma - Identity(2)), v) / Wi
     t1 = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
@@ -66,7 +66,7 @@ def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b,
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
-    t5 = (A(sigma, b) / (10*Wi) * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
+    t5 = (A(sigma, b) / (lambd) * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
     triple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
     extra_diffusion = (alpha * triple_dot) * dx
     F_new = t1 + t2 - t3 - t4 + t5 + extra_diffusion
@@ -99,7 +99,7 @@ def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alph
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
         solver.convergence_criterion = "incremental"
         solver.report = True
-        solver.rtol = 1e-8
+        solver.rtol = 1e-4
         solver.max_it = 1000
         if not newton:
             ksp = solver.krylov_solver
