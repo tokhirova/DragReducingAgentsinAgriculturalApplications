@@ -66,7 +66,7 @@ def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b,
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
-    t5 = (A(sigma, b) / Wi * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
+    t5 = (A(sigma, b) / (10*Wi) * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
     triple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
     extra_diffusion = (alpha * triple_dot) * dx
     F_new = t1 + t2 - t3 - t4 + t5 + extra_diffusion

@@ -30,7 +30,7 @@ gmsh.initialize()
 gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim)
 
-experiment_number = 2006
+experiment_number = 10010
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
@@ -48,12 +48,12 @@ k = Constant(mesh, PETSc.ScalarType(dt))
 U_n = 1  # mean inlet velocity
 L_n = 0.1  # characteristic length
 rho_n = 1.0  # density
-vs_n = 0.00099  # fluid visc.
+vs_n = 0.0007  # fluid visc.
 
 # flow properties for fokker planck
-vp_n = 0.00001  # polymer visc.
+vp_n = 0.0003  # polymer visc.
 b = 60  # dumbbell length
-Wi = 0.3  # Weissenberg number
+Wi = 0.03  # Weissenberg number
 alpha = 0.01  # extra diffusion scale
 
 # mixture properties
@@ -152,7 +152,7 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = vp * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+div_tau = vp/(10*Wi) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
 F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
 F1 += vs * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
