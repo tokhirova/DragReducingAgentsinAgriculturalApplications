@@ -3,6 +3,9 @@ import ufl
 from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
                  div, ds, dx, inner, lhs, nabla_grad, rhs, sym)
 import basix
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+
 import numpy as np
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -56,7 +59,7 @@ def A(sigma, b):
     return 1 / (1 - ufl.tr(sigma) / b)
 
 
-def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, lambd, alpha):
+def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
     # Problem definition
     # div_tau = 100 * ufl.dot(div((A(sigma, b)) * sigma - Identity(2)), v) / Wi
     t1 = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx
@@ -66,7 +69,7 @@ def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b,
     t3 = (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx
     t4 = (ufl.tr(
         sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
-    t5 = (A(sigma, b) / (lambd) * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
+    t5 = (A(sigma, b) / (Wi) * ufl.tr(sigma * ufl.transpose(phi)) - ufl.tr(phi)) * dx
     triple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
     extra_diffusion = (alpha * triple_dot) * dx
     F_new = t1 + t2 - t3 - t4 + t5 + extra_diffusion

@@ -1,5 +1,8 @@
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
 import gmsh
 import dolfinx
+
 import numpy as np
 import matplotlib.pyplot as plt
 import tqdm.autonotebook
@@ -20,7 +23,6 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
                  sqrt, transpose, tr)
 import sys
-import os
 
 sys.path.append('models/FENE-P/')
 import fene_p
@@ -31,12 +33,11 @@ gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
 
 # ---------------------------------------------------------------------------------------------------------------------
-experiment_number = 10035
+experiment_number = 11006
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
 os.mkdir(plot_path)
-
 # ---------------------------------------------------------------------------------------------------------------------
 # discretization parameters
 t = 0
@@ -45,23 +46,25 @@ dt = 1 / (100)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-# flow properties for navier stokes
+# flow properties for navier stokes2
 U_n = 1  # mean inlet velocity
 L_n = 0.1  # characteristic length
 rho_n = 1.0  # density
-vs_n = 0.000995  # fluid visc.
+vs_n = 0.001  # fluid visc.
 
 # flow properties for fokker planck
-vp_n = 0.000005  # polymer visc.
+vp_n = 0.0035  # polymer visc.
 b = 100  # dumbbell length
 lambd = 0.03
-Wi = lambd*U_n/L_n # 0.03  # Weissenberg number
+Wi = lambd*U_n/L_n  # 0.03  # Weissenberg number
 alpha = 0.01  # extra diffusion scale
 
-# mixture properties
+# mixture properties0
 vis = vs_n + vp_n  # total visc.
-b_n = vs_n / vis  # solvent ratio
-Re_n = (U_n * L_n) / vis  # reynolds number
+# b_n = vs_n / vis  # solvent ratio
+b_n = 0.95
+# Re_n = (U_n * L_n) / vis  # reynolds number
+Re_n = 1000
 
 # doflinx parameter initialization
 beta = Constant(mesh, PETSc.ScalarType(b_n))
@@ -154,10 +157,10 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = vp/(lambd) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
-F1 = rho / k * dot(u - u_n, v) * dx
+div_tau = (1-beta)/(Re*Wi) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+F1 = 1 / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += vs * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+F1 += beta/Re * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
@@ -208,8 +211,8 @@ n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)  # 0.1
-lift = form(-2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)  # 0.1
+drag = form(2/0.1 * (0.1/Re * inner(10*grad(u_t*U_n), n) * n[1] - 0.001*p_ * n[0]) * dObs)
+lift = form(-2/0.1 * (0.1/Re * inner(10*grad(u_t*U_n), n) * n[0] + 0.001*p_ * n[1]) * dObs)
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
@@ -280,7 +283,7 @@ for i in range(num_steps):
     u_.x.scatter_forward()
     # ---------------------------------------------------------------------------------------------------------------------
     # Step 2: FENE-P solving
-    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, lambd, alpha,cond)
+    crash = fene_p.solve(sigma, sigma_n, dt, u_[0], u_[1], bc, phi_tf, b, Wi, alpha,cond)
     if crash:
         print(f"FENE-P pipeline crashed at t={t}!")
         break
