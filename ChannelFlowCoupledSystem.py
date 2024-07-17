@@ -33,7 +33,7 @@ gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
 
 # ---------------------------------------------------------------------------------------------------------------------
-experiment_number = 11006
+experiment_number = 11017
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
@@ -62,9 +62,9 @@ alpha = 0.01  # extra diffusion scale
 # mixture properties0
 vis = vs_n + vp_n  # total visc.
 # b_n = vs_n / vis  # solvent ratio
-b_n = 0.95
+b_n = 1
 # Re_n = (U_n * L_n) / vis  # reynolds number
-Re_n = 1000
+Re_n = 500
 
 # doflinx parameter initialization
 beta = Constant(mesh, PETSc.ScalarType(b_n))
@@ -211,8 +211,8 @@ n = -FacetNormal(mesh)  # Normal pointing out of obstacle
 dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2/0.1 * (0.1/Re * inner(10*grad(u_t*U_n), n) * n[1] - 0.001*p_ * n[0]) * dObs)
-lift = form(-2/0.1 * (0.1/Re * inner(10*grad(u_t*U_n), n) * n[0] + 0.001*p_ * n[1]) * dObs)
+drag = form(2/0.1 * (0.1/Re * inner(grad(u_t*U_n), n) * n[1] - p_ * n[0]) * dObs)
+lift = form(-2/0.1 * (0.1/Re * inner(grad(u_t*U_n), n) * n[0] + p_ * n[1]) * dObs)
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
