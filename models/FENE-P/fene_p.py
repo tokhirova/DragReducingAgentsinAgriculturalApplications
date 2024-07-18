@@ -174,7 +174,7 @@ def plotting_gif(sigma_list, V):
 
 
 def pipeline():
-    experiment_number = 93
+    experiment_number = 11
     np_path = f'results/fp/experiments/arrays/{experiment_number}/'
     plot_path = f"results/fp/experiments/plots/{experiment_number}/"
     os.mkdir(np_path)
@@ -202,7 +202,7 @@ def pipeline():
     vector_field1 = u[0]
     vector_field2 = u[1]
     steps = 10
-    T = 1.0
+    T = 0.1
     t = t0 = 0
     num_it = int((T - t0) / steps)
     dt = T / steps
@@ -249,8 +249,9 @@ def pipeline():
                           [sigma_21_solution_data[i][j], sigma_22_solution_data[i][j]]])
 
             trace_A = np.trace(A)
-            factor = (1 - trace_A / b) ** (-1)
+            factor = 1/(1 - trace_A / b)
             B = factor * A - np.identity(2)
+            print(factor, A, B)
 
             B_prime += B
 
@@ -301,7 +302,7 @@ def pipeline():
     plt.savefig(plot_path + "tau_22_comparison.png")
 
 
-# pipeline()
+pipeline()
 
 
 # plotting_gif(sigma_11_solution_data,V)
