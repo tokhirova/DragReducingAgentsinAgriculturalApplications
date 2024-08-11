@@ -3,8 +3,9 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
-import pygnuplot
 
+# this pipline is only used to visualize the various results we present
+# ---------------------------------------------------------------------------------------------------------------------
 i = 11011
 j = 11012
 k = 11013
@@ -21,16 +22,10 @@ drag_polymer4 = np.load(f"results/arrays/experiments/{m}/drag_coeff.npy") #lower
 # drag_polymer6 = np.load(f"results/arrays/experiments/{o}/drag_coeff.npy") #lower Re
 # drag_polymer5 = np.load("results/arrays/experiments/11014/drag_coeff.npy")
 # drag_polymer6 = np.load("results/arrays/experiments/10026/drag_coeff.npy")
-# data_1 = pygnuplot.File("'plots/benchmark_data/plot_drag_bench2.plt'", using='1:2',with_='line', title="test")
-#
-# from IPython import embed
-# embed()
+
 
 time = np.load("results/arrays/experiments/11000/u_time.npy")
-#
-# # from IPython import embed
-# # embed()
-#
+
 # dp1 = np.divide(drag_no_polymer-drag_polymer1,drag_no_polymer) * 100
 # dp2 = np.divide(drag_no_polymer-drag_polymer2,drag_no_polymer) * 100
 # dp03= np.divide(drag_no_polymer-drag_polymer3,drag_no_polymer) * 100
@@ -76,7 +71,7 @@ time = np.load("results/arrays/experiments/11000/u_time.npy")
 # plt.grid()
 # plt.legend(["no polymer", "5% polymer", "10% polymer", "20% polymer"], loc="lower right")
 # plt.savefig("plots/experiments/11011/" + "Drag_comparison_with_no_polymer.png")
-
+# ---------------------------------------------------------------------------------------------------------------------
 # cond = np.load("results/arrays/experiments/4000/F_cond.npy")
 # cond_time = np.load("results/arrays/experiments/4000/u_time.npy")
 # dt = 400
@@ -89,7 +84,7 @@ time = np.load("results/arrays/experiments/11000/u_time.npy")
 # plt.grid()
 # plt.legend()
 # plt.savefig("plots/experiments/4000/" + "condition_plot.png")
-
+# ---------------------------------------------------------------------------------------------------------------------
 tau = np.load(f"results/fp/experiments/arrays/{7}/tau.npy")
 s11 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma11.npy"), axis=1)[:800]
 s12 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma12.npy"), axis=1)[:800]
@@ -124,4 +119,4 @@ fig, axs = plt.subplots(2, 2)
 # axs[1, 1].set_title(r"$\sigma_{22}$")
 # plt.tight_layout()
 # plt.savefig(f"results/fp/experiments/plots/{7}/" + "sigma_plot.png")
-
+# ---------------------------------------------------------------------------------------------------------------------
