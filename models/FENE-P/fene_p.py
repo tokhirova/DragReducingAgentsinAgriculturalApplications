@@ -302,7 +302,7 @@ def pipeline():
     plt.savefig(plot_path + "tau_22_comparison.png")
 
 
-pipeline()
+# pipeline()
 
 
 # plotting_gif(sigma_11_solution_data,V)

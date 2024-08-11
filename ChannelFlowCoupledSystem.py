@@ -33,7 +33,7 @@ gdim = 2
 mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
 
 # ---------------------------------------------------------------------------------------------------------------------
-experiment_number = 11017
+experiment_number = 11021
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
@@ -62,9 +62,9 @@ alpha = 0.01  # extra diffusion scale
 # mixture properties0
 vis = vs_n + vp_n  # total visc.
 # b_n = vs_n / vis  # solvent ratio
-b_n = 1
+b_n = 0.9
 # Re_n = (U_n * L_n) / vis  # reynolds number
-Re_n = 500
+Re_n = 1000
 
 # doflinx parameter initialization
 beta = Constant(mesh, PETSc.ScalarType(b_n))

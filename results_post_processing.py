@@ -95,18 +95,33 @@ s11 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma11.npy"), axis=1)[
 s12 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma12.npy"), axis=1)[:800]
 s21 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma21.npy"), axis=1)[:800]
 s22 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma22.npy"), axis=1)[:800]
+s11_ = np.load(f"results/fp/experiments/arrays/{7}/sigma11.npy")[:800]
+s12_ = np.load(f"results/fp/experiments/arrays/{7}/sigma12.npy")[:800]
+s21_ = np.load(f"results/fp/experiments/arrays/{7}/sigma21.npy")[:800]
+s22_ = np.load(f"results/fp/experiments/arrays/{7}/sigma22.npy")[:800]
+tr = s11_ + s22_
+tr_cond = tr < 30
+true_count = np.sum(tr_cond)
+false_count = max(len(tr_cond) - true_count,0)
+
+# Data for the histogram
+categories = ['True', 'False']
+counts = [true_count, false_count]
+plt.bar(categories, counts, color=['green', 'red'])
+plt.title(r"$tr(\sigma)<b ?$")
+plt.savefig(f"results/fp/experiments/plots/{7}/" + "sigma_hist_plot.png")
 fig, axs = plt.subplots(2, 2)
 
 # Iterate over the matrix elements and plot each element in its respective subplot
 
-axs[0, 0].plot(time,s11)
-axs[0, 0].set_title(r"$\sigma_{11}$")
-axs[0, 1].plot(time,s12)
-axs[0, 1].set_title(r"$\sigma_{12}$")
-axs[1, 0].plot(time,s21)
-axs[1, 0].set_title(r"$\sigma_{21}$")
-axs[1, 1].plot(time,s22)
-axs[1, 1].set_title(r"$\sigma_{22}$")
-plt.tight_layout()
-plt.savefig(f"results/fp/experiments/plots/{7}/" + "sigma_plot.png")
+# axs[0, 0].plot(time,s11)
+# axs[0, 0].set_title(r"$\sigma_{11}$")
+# axs[0, 1].plot(time,s12)
+# axs[0, 1].set_title(r"$\sigma_{12}$")
+# axs[1, 0].plot(time,s21)
+# axs[1, 0].set_title(r"$\sigma_{21}$")
+# axs[1, 1].plot(time,s22)
+# axs[1, 1].set_title(r"$\sigma_{22}$")
+# plt.tight_layout()
+# plt.savefig(f"results/fp/experiments/plots/{7}/" + "sigma_plot.png")
 
