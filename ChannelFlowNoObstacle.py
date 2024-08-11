@@ -1,8 +1,5 @@
-import os
-os.environ['OPENBLAS_NUM_THREADS'] = '1'
 import gmsh
 import dolfinx
-
 import numpy as np
 import matplotlib.pyplot as plt
 import tqdm.autonotebook
@@ -23,48 +20,47 @@ from ufl import (FacetNormal, Identity, Measure, TestFunction, TrialFunction,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system, SpatialCoordinate, inv,
                  sqrt, transpose, tr)
 import sys
+import os
 
 sys.path.append('models/FENE-P/')
 import fene_p
 import mesh_init
 
-gmsh.initialize()
+# gmsh.initialize()
 gdim = 2
-mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
+mesh, ft, inlet_marker, wall_marker, outlet_marker, _ = mesh_init.create_mesh(gdim)
 
 # ---------------------------------------------------------------------------------------------------------------------
-experiment_number = 11021
+experiment_number = 20006
 np_path = f'results/arrays/experiments/{experiment_number}/'
 plot_path = f"plots/experiments/{experiment_number}/"
 os.mkdir(np_path)
 os.mkdir(plot_path)
+
 # ---------------------------------------------------------------------------------------------------------------------
 # discretization parameters
 t = 0
-T = 8.0  # Final time
+T = 25.0  # Final time
 dt = 1 / (100)  # Time step size
 num_steps = int(T / dt)
 k = Constant(mesh, PETSc.ScalarType(dt))
 
-# flow properties for navier stokes2
+# flow properties for navier stokes
 U_n = 1  # mean inlet velocity
-L_n = 0.1  # characteristic length
+L_n = 1 # 0.1  # characteristic length
 rho_n = 1.0  # density
-vs_n = 0.001  # fluid visc.
-
+vs_n = 1.5 #0.0007  # fluid visc.
 # flow properties for fokker planck
-vp_n = 0.0035  # polymer visc.
-b = 100  # dumbbell length
-lambd = 0.03
-Wi = lambd*U_n/L_n  # 0.03  # Weissenberg number
-alpha = 0.01  # extra diffusion scale
+vp_n = 3.5  # polymer visc.
+b = 60  # dumbbell length
+lambd = 0.4
+Wi = lambd*U_n/L_n # 0.03  # Weissenberg number
+alpha = 0.0  # extra diffusion scale
 
-# mixture properties0
+# mixture properties
 vis = vs_n + vp_n  # total visc.
-# b_n = vs_n / vis  # solvent ratio
-b_n = 0.9
-# Re_n = (U_n * L_n) / vis  # reynolds number
-Re_n = 1000
+b_n = vs_n / vis  # solvent ratio
+Re_n = (U_n * L_n) / vis  # reynolds number
 
 # doflinx parameter initialization
 beta = Constant(mesh, PETSc.ScalarType(b_n))
@@ -85,7 +81,7 @@ with open(np_path + "variables.txt", "w") as text_file:
     text_file.write("Max Extension: %s \n" % b)
     text_file.write("dt: %s \n" % dt)
     text_file.write("T: %s \n" % T)
-    text_file.write("beta: %s" % b_n)
+    text_file.write("beta: %s" %  b_n)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # navier stokes function spaces
@@ -122,8 +118,9 @@ u_nonslip = np.array((0,) * mesh.geometry.dim, dtype=PETSc.ScalarType)
 bcu_walls = dirichletbc(u_nonslip, locate_dofs_topological(V, fdim, ft.find(wall_marker)), V)
 
 # Obstacle
-bcu_obstacle = dirichletbc(u_nonslip, locate_dofs_topological(V, fdim, ft.find(obstacle_marker)), V)
-bcu = [bcu_inflow, bcu_obstacle, bcu_walls]
+# bcu_obstacle = dirichletbc(u_nonslip, locate_dofs_topological(V, fdim, ft.find(obstacle_marker)), V)
+# bcu = [bcu_inflow, bcu_obstacle, bcu_walls]
+bcu = [bcu_inflow, bcu_walls]
 
 # Outlet
 bcp_outlet = dirichletbc(PETSc.ScalarType(0), locate_dofs_topological(Q, fdim, ft.find(outlet_marker)), Q)
@@ -157,10 +154,10 @@ sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
 n = FacetNormal(mesh)
 f = Constant(mesh, PETSc.ScalarType((0, 0)))
 # div_tau = (beta*(b+2)/b)/Wi * tr(((fene_p.A(sigma, b)) * sigma - Identity(2))*transpose(grad(v)))
-div_tau = (1-beta)/(Re*Wi) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
-F1 = 1 / k * dot(u - u_n, v) * dx
+div_tau = vp/(10*Wi) * dot(div((fene_p.A(sigma, b)) * sigma - Identity(2)), v)
+F1 = rho / k * dot(u - u_n, v) * dx
 F1 += inner(dot(1.5 * u_n - 0.5 * u_n1, 0.5 * nabla_grad(u + u_n)), v) * dx
-F1 += beta/Re * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
+F1 += vs * 0.5 * inner(grad(u + u_n), grad(v)) * dx - dot(p_, div(v)) * dx
 # F1 += dot(p_ * n, v) * ds - dot(mu * nabla_grad(0.5 * (u_n + u)) * n, v) * ds # = 0 for do-nothing BC
 F1 -= div_tau * dx  # extra stress
 F1 -= dot(f, v) * dx
@@ -208,11 +205,12 @@ pc3.setType(PETSc.PC.Type.SOR)
 # ---------------------------------------------------------------------------------------------------------------------
 # physical measurements
 n = -FacetNormal(mesh)  # Normal pointing out of obstacle
-dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
+dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
+# dObs = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=obstacle_marker)
 dout = Measure("ds", domain=mesh, subdomain_data=ft, subdomain_id=outlet_marker)
 u_t = inner(as_vector((n[1], -n[0])), u_)
-drag = form(2/0.1 * (0.1/Re * inner(grad(u_t*U_n), n) * n[1] - p_ * n[0]) * dObs)
-lift = form(-2/0.1 * (0.1/Re * inner(grad(u_t*U_n), n) * n[0] + p_ * n[1]) * dObs)
+drag = form(2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[1] - p_ * n[0]) * dObs)  # 0.1
+lift = form(-2 / 0.1 * (mu / rho * inner(grad(u_t), n) * n[0] + p_ * n[1]) * dObs)  # 0.1
 if mesh.comm.rank == 0:
     C_D = np.zeros(num_steps, dtype=PETSc.ScalarType)
     C_L = np.zeros(num_steps, dtype=PETSc.ScalarType)
