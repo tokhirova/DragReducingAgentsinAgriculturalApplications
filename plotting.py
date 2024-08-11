@@ -6,7 +6,8 @@ from basix.ufl import element
 from dolfinx.fem import functionspace
 import matplotlib.pyplot as plt
 import time
-
+# ---------------------------------------------------------------------------------------------------------------------
+# pipeline to create videos for displaying (partial) results
 NUMBER_X: int = 1
 NUMBER_Y: int = 1
 

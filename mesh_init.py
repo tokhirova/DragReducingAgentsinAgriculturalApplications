@@ -2,6 +2,9 @@ import gmsh
 import numpy as np
 from mpi4py import MPI
 from dolfinx.io import (VTXWriter, distribute_entity_data, gmshio)
+
+# ---------------------------------------------------------------------------------------------------------------------
+# mesh initialization used from the dolfinx tutorial and adjusted for our purposes
 gmsh.initialize()
 
 L = 2.2
