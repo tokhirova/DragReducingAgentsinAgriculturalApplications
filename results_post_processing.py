@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 # this pipline is only used to visualize the various results we present
 # ---------------------------------------------------------------------------------------------------------------------
+# block of plotting drag and lift coefficients
 i = 11011
 j = 11012
 k = 11013
@@ -18,60 +19,37 @@ drag_polymer1 = np.load(f"results/arrays/experiments/{j}/drag_coeff.npy") #5%
 drag_polymer2 = np.load(f"results/arrays/experiments/{k}/drag_coeff.npy") #10%
 drag_polymer3 = np.load(f"results/arrays/experiments/{l}/drag_coeff.npy") #20%
 drag_polymer4 = np.load(f"results/arrays/experiments/{m}/drag_coeff.npy") #lower Re
-# drag_polymer5 = np.load(f"results/arrays/experiments/{n}/drag_coeff.npy") #20%
-# drag_polymer6 = np.load(f"results/arrays/experiments/{o}/drag_coeff.npy") #lower Re
-# drag_polymer5 = np.load("results/arrays/experiments/11014/drag_coeff.npy")
-# drag_polymer6 = np.load("results/arrays/experiments/10026/drag_coeff.npy")
 
 
 time = np.load("results/arrays/experiments/11000/u_time.npy")
 
-# dp1 = np.divide(drag_no_polymer-drag_polymer1,drag_no_polymer) * 100
-# dp2 = np.divide(drag_no_polymer-drag_polymer2,drag_no_polymer) * 100
-# dp03= np.divide(drag_no_polymer-drag_polymer3,drag_no_polymer) * 100
-# dp04= np.divide(drag_no_polymer-drag_polymer4,drag_no_polymer) * 100
-# # dp05= np.divide(drag_no_polymer-drag_polymer5,drag_no_polymer) * 100
-# # dp06= np.divide(drag_no_polymer-drag_polymer6,drag_no_polymer) * 100
-# d1 = scipy.integrate.simpson(dp1,time)
-# d2 = scipy.integrate.simpson(dp2,time)
-# d03 = scipy.integrate.simpson(dp03,time)
-# d04 = scipy.integrate.simpson(dp04,time)
-# # d05 = scipy.integrate.simpson(dp05,time)
-# # d06 = scipy.integrate.simpson(dp06,time)
-# print(d1)
-# print(d2)
-# print(d03)
-# print(d04)
-# # print(d05)
-# # print(d06)
+dp1 = np.divide(drag_no_polymer-drag_polymer1,drag_no_polymer) * 100
+dp2 = np.divide(drag_no_polymer-drag_polymer2,drag_no_polymer) * 100
+dp03= np.divide(drag_no_polymer-drag_polymer3,drag_no_polymer) * 100
+dp04= np.divide(drag_no_polymer-drag_polymer4,drag_no_polymer) * 100
+d1 = scipy.integrate.simpson(dp1,time)
+d2 = scipy.integrate.simpson(dp2,time)
+d03 = scipy.integrate.simpson(dp03,time)
+d04 = scipy.integrate.simpson(dp04,time)
+print(d1)
+print(d2)
+print(d03)
+print(d04)
+
 #
-# fig = plt.figure(figsize=(25, 8))
-# l1 = plt.plot(time,drag_no_polymer, linewidth=2)
-# l4 = plt.plot(time,drag_polymer4, linewidth=2)
-# # l4 = plt.plot(time,drag_polymer6, linewidth=2)
-# # l4 = plt.plot(time,drag_polymer5, linewidth=2)
-# plt.title("Drag comparison")
-# plt.xlabel("Time t")
-# plt.ylabel(r"$\text{Drag coefficient } \text{C}_{D}$")
-# plt.grid()
-# plt.legend(["no polymer", "lower reynolds number"], loc="lower right")
-# plt.savefig("plots/experiments/11011/" + "Drag_comparison_in_turbulence_reduction.png")
-#
-# fig = plt.figure(figsize=(25, 8))
-# l1 = plt.plot(time,drag_no_polymer, linewidth=2)
-# l4 = plt.plot(time,drag_polymer1, linewidth=2)
-# l4 = plt.plot(time,drag_polymer2, linewidth=2)
-# l4 = plt.plot(time,drag_polymer3, linewidth=2)
-# # l4 = plt.plot(time,drag_polymer4, linewidth=2)
-# # l4 = plt.plot(time,drag_polymer6, linewidth=2)
-# # l4 = plt.plot(time,drag_polymer5, linewidth=2)
-# plt.title("Drag comparison")
-# plt.xlabel("Time t")
-# plt.ylabel(r"$\text{Drag coefficient } \text{C}_{D}$")
-# plt.grid()
-# plt.legend(["no polymer", "5% polymer", "10% polymer", "20% polymer"], loc="lower right")
-# plt.savefig("plots/experiments/11011/" + "Drag_comparison_with_no_polymer.png")
+fig = plt.figure(figsize=(25, 8))
+l1 = plt.plot(time,drag_no_polymer, linewidth=2)
+l4 = plt.plot(time,drag_polymer1, linewidth=2)
+l4 = plt.plot(time,drag_polymer2, linewidth=2)
+l4 = plt.plot(time,drag_polymer3, linewidth=2)
+plt.title("Drag comparison")
+plt.xlabel("Time t")
+plt.ylabel(r"$\text{Drag coefficient } \text{C}_{D}$")
+plt.grid()
+plt.legend(["no polymer", "5% polymer", "10% polymer", "20% polymer"], loc="lower right")
+plt.savefig("plots/experiments/11011/" + "Drag_comparison_with_no_polymer.png")
 # ---------------------------------------------------------------------------------------------------------------------
+# condition number of nonlinear system
 # cond = np.load("results/arrays/experiments/4000/F_cond.npy")
 # cond_time = np.load("results/arrays/experiments/4000/u_time.npy")
 # dt = 400
@@ -85,6 +63,7 @@ time = np.load("results/arrays/experiments/11000/u_time.npy")
 # plt.legend()
 # plt.savefig("plots/experiments/4000/" + "condition_plot.png")
 # ---------------------------------------------------------------------------------------------------------------------
+# block to print tau-tensor of fokker-planck system
 tau = np.load(f"results/fp/experiments/arrays/{7}/tau.npy")
 s11 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma11.npy"), axis=1)[:800]
 s12 = np.sum(np.load(f"results/fp/experiments/arrays/{7}/sigma12.npy"), axis=1)[:800]

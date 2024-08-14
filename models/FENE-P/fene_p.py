@@ -190,12 +190,6 @@ def pipeline():
     domain = dolfinx.mesh.create_rectangle(comm_t, [np.array([0., 0.]), np.array([Lx, Ly])],
                                            [Nx, Ny], dolfinx.mesh.CellType.triangle)
     V, sigma, phi = function_space(domain)
-    # plotter = pyvista.Plotter()
-    # topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
-    # grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
-    # plotter.add_mesh(grid, show_edges=True, show_scalar_bar=True)
-    # plotter.view_xy()
-    # figure = plotter.screenshot("sigma_domain.png")
     x = ufl.SpatialCoordinate(domain)
     bc = boundary_conditions(domain, V, x)
     u = vector_field(x, domain)
@@ -304,35 +298,3 @@ def pipeline():
 
 # pipeline()
 
-
-# plotting_gif(sigma_11_solution_data,V)
-
-
-def petsc2array(v):
-    s = v.getValues(range(0, v.getSize()[0]), range(0, v.getSize()[1]))
-    return s
-
-
-def test(A, t):
-    eigensolver = SLEPc.EPS().create(MPI.COMM_WORLD)
-    eigensolver.setOperators(A)
-    eigensolver.setWhichEigenpairs(t)
-    # Print = PETSc.Sys.Print
-    nev, ncv, mpd = eigensolver.getDimensions()
-    # Print("Number of requested eigenvalues: %d" % nev)
-    eigensolver.solve()
-    vr, wr = A.getVecs()
-    vi, wi = A.getVecs()
-    nconv = eigensolver.getConverged()
-    #
-    k = []
-    for i in range(nconv):
-        k.append(eigensolver.getEigenpair(i, vr, vi))
-        error = eigensolver.computeError(i)
-        # if k[-1].imag != 0.0:
-        #     Print(" %9f%+9f j %12g" % (k[-1].real, k[-1].imag, error))
-        # else:
-        #     Print(" %12f      %12g" % (k[-1].real, error))
-    # Print()
-
-    return k
