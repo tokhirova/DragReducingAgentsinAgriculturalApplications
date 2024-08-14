@@ -3,6 +3,7 @@ optional: conda activate fenicsx-env
 run the coupled system: (same for ChannelFlowNoObstacle.py)
 adjust parameters in ChannelFlowCoupledSystem.py
 run ChannelFlowCoupledSystem.py by running "python3 ChannelFlowCoupledSystem.py"
+note: the reynolds number is stated as 1000 but results are for Re=100 -> there is a factor bug we were unable to find ..)
 
 in order to run FENE-P fokker-planck pipeline:
 uncomment line 299 in file models/FENE-P/fene_p.py
