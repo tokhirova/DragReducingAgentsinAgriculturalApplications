@@ -1,0 +1,121 @@
+import dolfinx
+import ufl
+from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
+                 div, ds, dx, inner, lhs, nabla_grad, rhs, sym)
+import basix
+import numpy as np
+from mpi4py import MPI
+from petsc4py import PETSc
+import petsc4py
+import dolfinx.fem.petsc
+from dolfinx.nls.petsc import NewtonSolver
+import pyvista
+import os
+import matplotlib.pyplot as plt
+from slepc4py import SLEPc
+
+
+def function_space(domain):
+    # function space
+    # https://jsdokken.com/dolfinx-tutorial/chapter2/ns_code1.html
+    forsigma = basix.ufl.element("Lagrange", domain.topology.cell_name(), 1, shape=(2, 2))
+    V = dolfinx.fem.functionspace(domain, forsigma)
+
+    # Test function definition
+    sigma = dolfinx.fem.Function(V)
+    phi = ufl.TestFunction(V)
+    return V, sigma, phi
+
+def boundary_conditions(domain, V, x):
+    # boundary conditions https://jsdokken.com/dolfinx-tutorial/chapter1/fundamentals_code.html
+    s_D = dolfinx.fem.Function(V)
+    s_D.vector.set(0.0)
+
+    #apply the boundary values to all degrees of freedom that are on the boundary of the discrete domain. 
+    #We start by identifying the facets (line-segments) representing the outer boundary
+    tdim = domain.topology.dim
+    fdim = tdim - 1
+
+    boundary = lambda x: np.logical_or(np.logical_or(np.isclose(x[0], 0.0), np.isclose(x[1], 1.0)),
+                                       np.logical_or(np.isclose(x[0], 1.0), np.isclose(x[1], 0.0)))
+    boundary_facets = dolfinx.mesh.locate_entities_boundary(domain, fdim, boundary)
+    bc = dolfinx.fem.dirichletbc(s_D, dolfinx.fem.locate_dofs_topological(V, fdim, boundary_facets))
+    return bc
+
+def vector_field(x, mesh):
+    # vector field definition u(x,y)=(y-y²,0)
+    v_cg2 = basix.ufl.element("Lagrange", mesh.topology.cell_name(), 1, shape=(mesh.geometry.dim,)) # why 2, not 1
+    V = dolfinx.fem.functionspace(mesh, v_cg2)
+    f = dolfinx.fem.Function(V)
+    f.vector.set(0.0)
+    u1 = x[1] - x[1] ** 2
+    u2 = 0
+    return [u1, u2]
+
+def f(sigma, b):
+    return 1 / (1 - ufl.tr(sigma) / b) #f(tr(s))=l^2/(l^2-tr(s))
+
+def problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha):
+    
+    t1 = (ufl.tr(vector_field1 * sigma.dx(0) + vector_field2 * sigma.dx(1) * ufl.transpose(phi))) * dx
+    t2 = (ufl.tr(sigma * ufl.transpose(ufl.grad(ufl.as_vector([vector_field1, vector_field2]))) * ufl.transpose(phi))) * dx
+    
+    trace_term=(f(sigma, b) / (Wi) * ufl.tr(sigma * ufl.transpose(phi) - ufl.transpose(phi))) * dx
+    triple_dot = ufl.inner(ufl.grad(sigma), ufl.grad(phi))
+    extra_diffusion = (alpha * triple_dot) * dx
+
+    myfunc = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi))) * dx  - (ufl.tr(ufl.grad(ufl.as_vector([vector_field1, vector_field2])) * sigma * ufl.transpose(phi))) * dx + t1 - t2 + trace_term + extra_diffusion
+    return myfunc
+
+
+def solution_initialization(steps, V):
+    sigma_n = dolfinx.fem.Function(V)
+    sigma_n.vector.set(0.0)
+
+    sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data = [], [], [], []
+    sigma_n_array = sigma_n.x.array
+    
+    sigma_11_solution_data.append([sigma_n_array[4 * k] for k in range(int(sigma_n_array.shape[0] / 4))])
+    sigma_12_solution_data.append([sigma_n_array[4 * k + 1] for k in range(int(sigma_n_array.shape[0] / 4))])
+    sigma_21_solution_data.append([sigma_n_array[4 * k + 2] for k in range(int(sigma_n_array.shape[0] / 4))])
+    sigma_22_solution_data.append([sigma_n_array[4 * k + 3] for k in range(int(sigma_n_array.shape[0] / 4))])
+    time_values_data = np.zeros(steps + 1)
+    return sigma_n, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data, sigma_22_solution_data, time_values_data
+
+#https://jsdokken.com/dolfinx-tutorial/chapter2/diffusion_code.html
+#https://jsdokken.com/dolfinx-tutorial/chapter2/hyperelasticity.html
+def solve(sigma, sigma_n, dt, vector_field1, vector_field2, bc, phi, b, Wi, alpha):
+    F = problem_definition(sigma, sigma_n, dt, vector_field1, vector_field2, phi, b, Wi, alpha)
+    problem = dolfinx.fem.petsc.NonlinearProblem(F, sigma)#, bcs=[bc])
+    newton = True
+    try:
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+        solver.convergence_criterion = "incremental"
+        solver.report = True
+        solver.rtol = 1e-4
+        solver.max_it = 1000
+        if not newton:
+            ksp = solver.krylov_solver
+            opts = PETSc.Options()
+            option_prefix = ksp.getOptionsPrefix()
+            opts[f"{option_prefix}ksp_type"] = "cg"
+            opts[f"{option_prefix}pc_type"] = "gamg"
+            opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+            ksp.setFromOptions()
+        n, converged = solver.solve(sigma)        
+        return False
+    except:
+        return True
+    
+def save_solutions(sigma, sigma_11_solution_data, sigma_12_solution_data, sigma_21_solution_data,
+                   sigma_22_solution_data, time_values_data, k, t):
+    sigma_array = sigma.x.array
+    sigma_11_solution_data.append([sigma_array[4 * k] for k in range(int(sigma_array.shape[0] / 4))])
+    sigma_12_solution_data.append([sigma_array[4 * k + 1] for k in range(int(sigma_array.shape[0] / 4))])
+    sigma_21_solution_data.append([sigma_array[4 * k + 2] for k in range(int(sigma_array.shape[0] / 4))])
+    sigma_22_solution_data.append([sigma_array[4 * k + 3] for k in range(int(sigma_array.shape[0] / 4))])
+    time_values_data[k + 1] = t
+
+def petsc2array(v):
+    s = v.getValues(range(0, v.getSize()[0]), range(0, v.getSize()[1]))
+    return s
