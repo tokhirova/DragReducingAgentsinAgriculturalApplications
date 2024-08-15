@@ -1,0 +1,134 @@
+import dolfinx
+import scipy.linalg
+import scipy
+import ufl
+from ufl import (FacetNormal, Identity, TestFunction, TrialFunction,
+                 div, dot, ds, dx, inner, lhs, nabla_grad, rhs, sym)
+from dolfinx.fem.petsc import (apply_lifting, assemble_matrix, assemble_vector,
+                               create_vector, create_matrix, set_bc)
+import basix
+import numpy as np
+from mpi4py import MPI
+from petsc4py import PETSc
+from dolfinx import fem, mesh, io, plot
+import petsc4py
+import dolfinx.fem.petsc
+from dolfinx.nls.petsc import NewtonSolver
+import pyvista
+
+#create a mesh https://jsdokken.com/dolfinx-tutorial/chapter2/diffusion_code.html
+nx, ny = 50, 50
+L=30 #length squared, test for different L
+Wi=50 #will change its value later
+
+domain = dolfinx.mesh.create_rectangle(MPI.COMM_WORLD, [np.array([0.0, 0.0]), np.array([1.0, 1.0])],
+                                       [nx, ny], dolfinx.mesh.CellType.triangle)
+
+#create the vector finite element, the dimension of the vector element will be set to the geometric dimension of the mesh 
+#https://jsdokken.com/dolfinx-tutorial/chapter2/ns_code1.html
+forsigma = basix.ufl.element("Lagrange", domain.topology.cell_name(), 1, shape=(2, 2))
+V = dolfinx.fem.functionspace(domain, forsigma)
+
+#https://jsdokken.com/dolfinx-tutorial/chapter2/nonlinpoisson_code.html
+x = ufl.SpatialCoordinate(domain)
+
+#we have already defined the exact solution, we only have to convert it to a Python function that can be evaluated in 
+#the interpolation function. We do this by employing the Python eval and lambda-functions - don't do it for now
+
+#boundary data https://jsdokken.com/dolfinx-tutorial/chapter1/fundamentals_code.html
+uD = dolfinx.fem.Function(V)
+uD.vector.set(0.0)
+
+#apply the boundary values to all degrees of freedom that are on the boundary of the discrete domain. 
+#We start by identifying the facets (line-segments) representing the outer boundary
+
+#left = lambda x: np.isclose(x[0], -2)
+#right = lambda x: np.isclose(x[0], 2)
+#wall =lambda x: np.logical_or(np.isclose(x[1], -2.0), np.isclose(x[1], 2.0))
+
+tdim = domain.topology.dim
+fdim = tdim - 1
+
+#inflow = dolfinx.mesh.locate_entities_boundary(domain, fdim, left)
+#outflow = dolfinx.mesh.locate_entities_boundary(domain, fdim, right)
+#walls = dolfinx.mesh.locate_entities_boundary(domain, fdim, wall)
+
+wall = lambda x: np.logical_or(np.logical_or(np.isclose(x[0], 0), np.isclose(x[1], 1)), np.logical_or(np.isclose(x[0], 1), np.isclose(x[1], 0.0)))
+walls = dolfinx.mesh.locate_entities_boundary(domain, fdim, wall)
+bc = dolfinx.fem.dirichletbc(uD, dolfinx.fem.locate_dofs_topological(V, fdim, walls))
+
+#the problem is nonlinear, we have to replace the TrialFunction with a Function, which serves as the unknown of our problem
+sigma, phi = dolfinx.fem.Function(V), ufl.TestFunction(V)
+#vector field
+u_vec=ufl.as_vector([x[1]-x[1]**2,0])
+
+def f(sigma, L):
+    return 1 / (1 - ufl.tr(sigma) / L) #f(tr(s))=l^2/(l^2-tr(s))
+
+def callfunc(sigma, sigma_n, dt, u_vec, phi, b, Wi, alpha):
+    #checked by Jonas
+    first = (ufl.tr((sigma - sigma_n) / dt * ufl.transpose(phi)) )* dx 
+    transposed=ufl.transpose(sigma)
+    upr=u_vec[0] * ufl.nabla_grad(transposed[:,0]) # + u_vec[1] * ufl.nabla_grad(transposed[:,1]) - add for arbitrary u
+    second = (ufl.tr(upr * ufl.transpose(phi)))* dx
+    third = (ufl.tr(sigma *ufl.grad(u_vec) * ufl.transpose(phi))) * dx
+    
+    myfunc = first + second - third +(1/Wi*f(sigma, L) * ufl.tr(sigma * ufl.transpose(phi))) * dx - (1/Wi * f(sigma, L) * ufl.tr(ufl.transpose(phi)) )* dx
+    extra_diffusion = (0.1 * ufl.inner(ufl.grad(sigma), ufl.grad(phi))) * dx # additional term from A. paper
+    myfunc+=extra_diffusion
+    return myfunc
+
+#Define temporal parameters
+#https://jsdokken.com/dolfinx-tutorial/chapter2/diffusion_code.html
+num_steps = 100
+t = 0 #starting time
+T = 1.0 #final time
+dt = T / num_steps
+
+sigma_n = dolfinx.fem.Function(V)
+sigma_n.vector.set(0.0)
+
+s12_sol = []
+sigma_n_array = sigma_n.x.array
+s12_sol.append([sigma_n_array[4 * k+1] for k in range(int(sigma_n_array.shape[0] / 4))])
+time = np.zeros(num_steps + 1)
+
+#https://jsdokken.com/dolfinx-tutorial/chapter2/diffusion_code.html
+#https://jsdokken.com/dolfinx-tutorial/chapter2/hyperelasticity.html
+
+for i in range(num_steps):
+    t += dt
+    sol = callfunc(sigma, sigma_n, dt)
+    problem = dolfinx.fem.petsc.NonlinearProblem(sol, sigma, bcs=[bc])
+    solver = NewtonSolver(MPI.COMM_WORLD, problem)
+
+    n, converged = solver.solve(sigma)
+    assert (converged)
+    print(f"Time step {n}, Number of iterations {n:d}")
+    sigma_array = sigma.x.array
+    s12_sol.append([sigma_array[4 * i+1] for i in range(int(sigma_array.shape[0] / 4))])
+    time[i + 1] = t
+    # Get value from owning process and update the ghosts, set all contributions
+    sigma.x.scatter_forward()
+    sigma_n.x.array[:] = sigma.x.array
+    t_n = t
+
+#https://jsdokken.com/dolfinx-tutorial/chapter1/fundamentals_code.html
+def animation(spisok):
+    plotter = pyvista.Plotter()
+    plotter.open_gif("sigma_12_1.gif")
+    topology, cell_types, geometry = dolfinx.plot.vtk_mesh(V)
+    
+    grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
+    grid.point_data["sigma"] = spisok[0]
+     
+    plotter.add_mesh(grid, show_edges=True, clim=[0, np.max(spisok)]) #
+    plotter.view_xy()#
+    
+    for sigma_sol in spisok:
+        grid.point_data["sigma"][:] = sigma_sol
+        plotter.write_frame()
+   
+    plotter.close()
+
+animation(s12_sol)
