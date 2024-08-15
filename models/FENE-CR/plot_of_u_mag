@@ -1,0 +1,37 @@
+import sys
+import dolfinx
+import pyvista
+import numpy as np
+from basix.ufl import element
+from dolfinx.fem import functionspace
+import matplotlib.pyplot as plt
+import time
+import gmsh
+
+import mesh_init
+gmsh.initialize()
+gdim = 2
+
+mesh, ft, inlet_marker, wall_marker, outlet_marker, obstacle_marker = mesh_init.create_mesh(gdim, True)
+v_cg = element("Lagrange", mesh.topology.cell_name(), 2, shape=(mesh.geometry.dim,))
+V = functionspace(mesh, v_cg) # for velocity
+
+#fs=V
+def gif_for_u(list, fs, path, var_name):
+    plotter = pyvista.Plotter()
+    plotter.open_movie(path)
+    topology, cell_types, geometry = dolfinx.plot.vtk_mesh(fs)
+    grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
+    grid.point_data[var_name] = list[0]
+    grid.set_active_scalars(var_name)
+    plotter.add_mesh(grid, show_edges=True, clim=[np.min(list), np.max(list)])
+    plotter.view_xy()
+
+    for sol in list:
+        grid.point_data[var_name][:] = sol
+        plotter.write_frame()
+    plotter.close()
+
+
+with open(f"results/arrays/experiments/1100/u_mag.npy", "rb") as f:
+        gif_for_u(np.load(f), V, f"plots/experiments/1100/u_magnitude.mp4", "||u||")
